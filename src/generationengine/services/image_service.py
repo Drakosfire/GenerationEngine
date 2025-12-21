@@ -2,9 +2,10 @@
 
 import time
 from datetime import datetime
-from typing import Dict
+from typing import Any, Dict
 
-from generationengine.models.errors import ErrorCode, GenerationError
+from generationengine.models.errors import ErrorCode
+from generationengine.models.responses import GenerationError
 from generationengine.models.image_responses import ImageGenerationResponse, ImageResult
 from generationengine.models.metrics import GenerationMetrics
 from generationengine.models.requests import ImageGenerationRequest, ImageModel
@@ -24,6 +25,7 @@ class ImageService:
         fal_api_key: str | None = None,
         openai_api_key: str | None = None,
         upload_service: UploadService | None = None,
+        metrics_service: Any | None = None,  # Type is 'Any' to avoid circular import
     ):
         """
         Initialize image service with providers.
@@ -32,14 +34,17 @@ class ImageService:
             fal_api_key: Fal.ai API key (defaults to FAL_KEY env var)
             openai_api_key: OpenAI API key (defaults to OPENAI_API_KEY env var)
             upload_service: Upload service instance (creates new one if not provided)
+            metrics_service: Optional MetricsService for recording metrics
         """
         # Initialize providers
         self.providers: Dict[str, ImageProvider] = {}
 
         try:
-            self.providers["flux-pro"] = FalProvider(api_key=fal_api_key)
-            self.providers["imagen4"] = FalProvider(api_key=fal_api_key)
-            self.providers["imagen4-fast"] = FalProvider(api_key=fal_api_key)
+            fal_provider = FalProvider(api_key=fal_api_key)
+            self.providers["flux-pro"] = fal_provider
+            self.providers["imagen4"] = fal_provider
+            self.providers["imagen4-fast"] = fal_provider
+            self.providers["flux-lora-i2i"] = fal_provider
         except (ImportError, ValueError) as e:
             # Fal provider not available - skip it
             pass
@@ -52,6 +57,7 @@ class ImageService:
 
         # Initialize upload service
         self.upload_service = upload_service or UploadService()
+        self._metrics_service = metrics_service
 
     async def generate(self, request: ImageGenerationRequest) -> ImageGenerationResponse:
         """
@@ -72,6 +78,8 @@ class ImageService:
             "model": request.model.value,
             "num_images": request.num_images,
             "size": request.size.value,
+            "image_url": request.image_url if request.image_url else None,
+            "strength": request.strength if request.strength else None,
         })
 
         try:
@@ -91,12 +99,19 @@ class ImageService:
 
             # Generate images with retry logic
             try:
+                # Extract image-to-image parameters
+                image_url = request.image_url if request.image_url else None
+                # Default strength to 0.85 if image_url provided but strength not specified
+                strength = request.strength if request.strength is not None else (0.85 if image_url else None)
+                
                 image_bytes_list = await retry_with_backoff(
                     provider.generate,
                     request.prompt,
                     model_key,
                     request.num_images,
                     request.get_size_tuple(),
+                    image_url=image_url,
+                    strength=strength,
                 )
             except RetryableError as e:
                 # Retry exhausted - return error
@@ -161,6 +176,10 @@ class ImageService:
                 input=input_json,
                 output=output_json,
             )
+
+            # Record metrics if service available
+            if self._metrics_service and hasattr(self._metrics_service, 'record'):
+                self._metrics_service.record(metrics, service_name="image")
 
             return ImageGenerationResponse(
                 success=True,

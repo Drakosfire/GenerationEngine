@@ -63,3 +63,71 @@ async def test_fal_provider_generate_timeout():
         # Message should mention timeout (message says "timed out")
         assert exc_info.value.message and ("timeout" in exc_info.value.message.lower() or "timed out" in exc_info.value.message.lower())
 
+
+@pytest.mark.asyncio
+async def test_fal_provider_image_to_image_success():
+    """Test successful image-to-image generation with Fal provider."""
+    with patch("generationengine.providers.fal_provider.fal_client") as mock_fal_client:
+        # Mock Fal response
+        mock_result = {
+            "images": [
+                {"url": "https://fal.ai/tmp/img1.png", "width": 768, "height": 1024},
+            ]
+        }
+        mock_fal_client.subscribe.return_value = mock_result
+
+        # Mock httpx for image downloads
+        with patch("generationengine.providers.fal_provider.httpx.AsyncClient") as mock_httpx:
+            mock_get = AsyncMock()
+            mock_get.return_value.content = b"image_data"
+            mock_get.return_value.raise_for_status = MagicMock()
+            mock_httpx.return_value.__aenter__.return_value.get = mock_get
+
+            provider = FalProvider(api_key="test-key")
+            result = await provider.generate(
+                prompt="A red dragon",
+                model="flux-lora-i2i",
+                num_images=1,
+                size=(768, 1024),
+                image_url="https://example.com/template.png",
+                strength=0.85,
+            )
+
+            assert len(result) == 1
+            assert all(isinstance(img, bytes) for img in result)
+            
+            # Verify fal_client.subscribe was called with image-to-image parameters
+            mock_fal_client.subscribe.assert_called_once()
+            call_args = mock_fal_client.subscribe.call_args
+            assert call_args[0][0] == "fal-ai/flux-lora/image-to-image"
+            assert call_args[1]["arguments"]["image_url"] == "https://example.com/template.png"
+            assert call_args[1]["arguments"]["strength"] == 0.85
+            assert call_args[1]["arguments"]["num_inference_steps"] == 35
+
+
+@pytest.mark.asyncio
+async def test_fal_provider_image_to_image_endpoint_mapping():
+    """Test that flux-lora-i2i model maps to correct endpoint."""
+    with patch("generationengine.providers.fal_provider.fal_client") as mock_fal_client:
+        mock_result = {"images": [{"url": "https://fal.ai/tmp/img1.png"}]}
+        mock_fal_client.subscribe.return_value = mock_result
+
+        with patch("generationengine.providers.fal_provider.httpx.AsyncClient") as mock_httpx:
+            mock_get = AsyncMock()
+            mock_get.return_value.content = b"image_data"
+            mock_get.return_value.raise_for_status = MagicMock()
+            mock_httpx.return_value.__aenter__.return_value.get = mock_get
+
+            provider = FalProvider(api_key="test-key")
+            await provider.generate(
+                prompt="test",
+                model="flux-lora-i2i",
+                num_images=1,
+                size=(768, 1024),
+                image_url="https://example.com/img.png",
+            )
+
+            # Verify correct endpoint was called
+            call_args = mock_fal_client.subscribe.call_args
+            assert call_args[0][0] == "fal-ai/flux-lora/image-to-image"
+

@@ -66,6 +66,35 @@ def test_image_generation_request_get_size_tuple():
     assert request_landscape.get_size_tuple() == (1024, 768)
 
 
+def test_image_generation_request_image_to_image_fields():
+    """Test that ImageGenerationRequest accepts image-to-image parameters."""
+    request = ImageGenerationRequest(
+        prompt="Transform this image",
+        model=ImageModel.FAL_FLUX_LORA_I2I,
+        image_url="https://example.com/template.png",
+        strength=0.85,
+    )
+
+    assert request.image_url == "https://example.com/template.png"
+    assert request.strength == 0.85
+    assert request.model == ImageModel.FAL_FLUX_LORA_I2I
+
+
+def test_image_generation_request_strength_validation():
+    """Test that strength is constrained to 0.0-1.0."""
+    # Valid range
+    ImageGenerationRequest(prompt="test", strength=0.0)
+    ImageGenerationRequest(prompt="test", strength=1.0)
+    ImageGenerationRequest(prompt="test", strength=0.5)
+
+    # Invalid ranges
+    with pytest.raises(Exception):  # Pydantic ValidationError
+        ImageGenerationRequest(prompt="test", strength=-0.1)
+
+    with pytest.raises(Exception):  # Pydantic ValidationError
+        ImageGenerationRequest(prompt="test", strength=1.1)
+
+
 # Contract tests for ImageGenerationResponse
 def test_image_generation_response_success_valid():
     """Test that successful ImageGenerationResponse has required fields."""

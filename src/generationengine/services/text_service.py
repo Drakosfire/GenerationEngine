@@ -1,6 +1,10 @@
-"""Text generation service with retry logic and error handling."""
+"""Text generation service with retry logic and error handling.
+
+Supports OpenAI Structured Outputs for guaranteed schema-compliant responses.
+"""
 
 import json
+import logging
 import os
 import time
 from datetime import datetime, timezone
@@ -21,15 +25,15 @@ from generationengine.models.requests import TextGenerationRequest
 from generationengine.models.responses import GenerationError
 from generationengine.models.text_responses import TextGenerationResponse
 from generationengine.services.retry_service import RetryableError, retry_with_backoff
+from generationengine.utils.schema_utils import make_schema_strict
+
+logger = logging.getLogger(__name__)
 
 
 # Pricing per 1K tokens (as of 2024, approximate values)
 # Source: https://openai.com/api/pricing/
 MODEL_PRICING: dict[str, dict[str, float]] = {
-    "gpt-4": {"prompt": 0.03, "completion": 0.06},
-    "gpt-4o": {"prompt": 0.005, "completion": 0.015},
-    "gpt-4o-2024-08-06": {"prompt": 0.005, "completion": 0.015},
-    "gpt-3.5-turbo": {"prompt": 0.0015, "completion": 0.002},
+    "gpt-5.1": {"prompt": 0.005, "completion": 0.015},  # Estimated, update when pricing available
 }
 
 
@@ -47,25 +51,36 @@ def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> flo
 class TextGenerationService:
     """Unified service for text generation with retry logic and error handling."""
 
-    def __init__(self, openai_api_key: str | None = None):
+    def __init__(
+        self,
+        openai_api_key: str | None = None,
+        metrics_service: Any | None = None,  # Type is 'Any' to avoid circular import
+    ):
         """
         Initialize text generation service.
 
         Args:
             openai_api_key: OpenAI API key (defaults to OPENAI_API_KEY env var)
+            metrics_service: Optional MetricsService for recording metrics
         """
         api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("OpenAI API key is required. Set OPENAI_API_KEY environment variable or pass openai_api_key.")
         
         self.openai_client = AsyncOpenAI(api_key=api_key)
+        self._metrics_service = metrics_service
 
-    async def generate(self, request: TextGenerationRequest) -> TextGenerationResponse:
+    async def generate(
+        self,
+        request: TextGenerationRequest,
+        service_name: str | None = None,
+    ) -> TextGenerationResponse:
         """
         Generate text using OpenAI with retry logic and error handling.
 
         Args:
             request: Text generation request
+            service_name: Optional service name for metrics categorization
 
         Returns:
             TextGenerationResponse with generated content or error
@@ -98,6 +113,19 @@ class TextGenerationService:
             if request.max_tokens:
                 request_kwargs["max_tokens"] = request.max_tokens
 
+            # Add structured output schema if provided
+            if request.response_schema:
+                strict_schema = make_schema_strict(request.response_schema)
+                request_kwargs["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": request.response_schema_name,
+                        "strict": True,
+                        "schema": strict_schema,
+                    }
+                }
+                logger.info(f"📋 [TextService] Using structured outputs with schema: {request.response_schema_name}")
+
             # Call OpenAI with retry logic
             response = await retry_with_backoff(
                 self._call_openai,
@@ -105,8 +133,27 @@ class TextGenerationService:
                 timeout_seconds=60.0,  # 60s timeout per attempt
             )
 
+            # Check for refusal (can happen with structured outputs)
+            message = response.choices[0].message
+            if hasattr(message, "refusal") and message.refusal:
+                logger.warning(f"🚫 [TextService] OpenAI refused generation: {message.refusal}")
+                return TextGenerationResponse(
+                    success=False,
+                    error=GenerationError(
+                        code=ErrorCode.PROVIDER_REJECTED,
+                        message=f"Generation refused: {message.refusal}",
+                        retryable=False,
+                    ),
+                    metrics=GenerationMetrics(
+                        duration_ms=int((time.time() - start_time) * 1000),
+                        retry_count=retry_count,
+                        timestamp=datetime.now(timezone.utc),
+                        input=input_json,
+                    ),
+                )
+
             # Success - extract content and usage
-            content = response.choices[0].message.content
+            content = message.content
             usage = response.usage
 
             # Calculate metrics
@@ -122,7 +169,7 @@ class TextGenerationService:
                 estimated_cost_usd=estimated_cost,
                 model_used=request.model.value,
                 retry_count=retry_count,
-                    timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(timezone.utc),
                 input=input_json,
                 output=json.dumps({
                     "content_length": len(content) if content else 0,
@@ -131,9 +178,26 @@ class TextGenerationService:
                 }),
             )
 
+            # Parse JSON when using structured outputs
+            parsed_content = None
+            structured_output = request.response_schema is not None
+            if structured_output and content:
+                try:
+                    parsed_content = json.loads(content)
+                    logger.info(f"✅ [TextService] Structured output parsed successfully")
+                except json.JSONDecodeError as e:
+                    # This should never happen with structured outputs, but handle gracefully
+                    logger.error(f"❌ [TextService] Failed to parse structured output: {e}")
+
+            # Record metrics if service available
+            if self._metrics_service and hasattr(self._metrics_service, 'record'):
+                self._metrics_service.record(metrics, service_name)
+
             return TextGenerationResponse(
                 success=True,
                 content=content,
+                parsed_content=parsed_content,
+                structured_output=structured_output,
                 metrics=metrics,
             )
 

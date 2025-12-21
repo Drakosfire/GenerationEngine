@@ -40,15 +40,19 @@ class FalProvider:
         model: str,
         num_images: int,
         size: Tuple[int, int],
+        image_url: str | None = None,
+        strength: float = 0.85,
     ) -> list[bytes]:
         """
         Generate images using Fal.ai.
 
         Args:
             prompt: Text prompt for image generation
-            model: Model identifier (flux-pro, imagen4, imagen4-fast)
+            model: Model identifier (flux-pro, imagen4, imagen4-fast, flux-lora-i2i)
             num_images: Number of images to generate (1-8)
             size: Output size as (width, height) tuple
+            image_url: Optional source image URL for image-to-image generation
+            strength: Transformation strength for image-to-image (0.0-1.0), default 0.85
 
         Returns:
             List of image bytes (one per generated image)
@@ -62,25 +66,37 @@ class FalProvider:
             "flux-pro": "fal-ai/flux-pro/new",
             "imagen4": "fal-ai/imagen4/preview",
             "imagen4-fast": "fal-ai/imagen4/preview/fast",
+            "flux-lora-i2i": "fal-ai/flux-lora/image-to-image",
         }
 
         endpoint = model_endpoints.get(model)
         if not endpoint:
             raise ValueError(f"Unsupported Fal model: {model}")
 
+        # Build arguments dict
+        arguments = {
+            "prompt": prompt,
+            "num_images": num_images,
+            "image_size": {
+                "width": size[0],
+                "height": size[1],
+            },
+            "enable_safety_checker": True,
+        }
+
+        # Add image-to-image parameters if image_url is provided
+        if image_url:
+            arguments["image_url"] = image_url
+            arguments["strength"] = strength
+            # flux-lora/image-to-image also uses num_inference_steps
+            if model == "flux-lora-i2i":
+                arguments["num_inference_steps"] = 35
+
         try:
             # Use subscribe for async operation
             fal_result = fal_client.subscribe(
                 endpoint,
-                arguments={
-                    "prompt": prompt,
-                    "num_images": num_images,
-                    "image_size": {
-                        "width": size[0],
-                        "height": size[1],
-                    },
-                    "enable_safety_checker": True,
-                },
+                arguments=arguments,
             )
 
             if not fal_result or "images" not in fal_result:

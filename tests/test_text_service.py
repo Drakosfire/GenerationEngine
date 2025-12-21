@@ -15,6 +15,7 @@ def mock_openai_response():
     response = MagicMock()
     response.choices = [MagicMock()]
     response.choices[0].message.content = "Generated text content"
+    response.choices[0].message.refusal = None  # Explicitly set to None for structured outputs check
     response.usage = MagicMock()
     response.usage.prompt_tokens = 10
     response.usage.completion_tokens = 20
@@ -40,7 +41,7 @@ async def test_text_generation_success(text_service, mock_openai_response):
 
     request = TextGenerationRequest(
         user_prompt="Generate a description",
-        model=TextModel.GPT_4O,
+        model=TextModel.GPT_5_1,
     )
 
     response = await text_service.generate(request)
@@ -50,7 +51,7 @@ async def test_text_generation_success(text_service, mock_openai_response):
     assert response.error is None
     assert response.metrics is not None
     assert response.metrics.tokens_used == 30
-    assert response.metrics.model_used == "gpt-4o"
+    assert response.metrics.model_used == "gpt-5.1"
     assert response.metrics.retry_count == 0
 
 
@@ -62,7 +63,7 @@ async def test_text_generation_with_system_prompt(text_service, mock_openai_resp
     request = TextGenerationRequest(
         system_prompt="You are a helpful assistant",
         user_prompt="Generate a description",
-        model=TextModel.GPT_4O,
+        model=TextModel.GPT_5_1,
     )
 
     response = await text_service.generate(request)
@@ -87,7 +88,7 @@ async def test_text_generation_with_parameters(text_service, mock_openai_respons
 
     request = TextGenerationRequest(
         user_prompt="Generate text",
-        model=TextModel.GPT_4,
+        model=TextModel.GPT_5_1,
         temperature=0.9,
         max_tokens=1000,
     )
@@ -98,7 +99,7 @@ async def test_text_generation_with_parameters(text_service, mock_openai_respons
     
     # Verify OpenAI was called with correct parameters
     call_args = text_service.openai_client.chat.completions.create.call_args
-    assert call_args[1]["model"] == "gpt-4"
+    assert call_args[1]["model"] == "gpt-5.1"
     assert call_args[1]["temperature"] == 0.9
     assert call_args[1]["max_tokens"] == 1000
 
@@ -167,13 +168,13 @@ def test_text_generation_request_validation():
     """Test TextGenerationRequest model validation."""
     request = TextGenerationRequest(
         user_prompt="Test prompt",
-        model=TextModel.GPT_4O,
+        model=TextModel.GPT_5_1,
         temperature=0.7,
         max_tokens=1000,
     )
 
     assert request.user_prompt == "Test prompt"
-    assert request.model == TextModel.GPT_4O
+    assert request.model == TextModel.GPT_5_1
     assert request.temperature == 0.7
     assert request.max_tokens == 1000
     assert request.system_prompt is None
@@ -183,7 +184,7 @@ def test_text_generation_request_defaults():
     """Test TextGenerationRequest default values."""
     request = TextGenerationRequest(user_prompt="Test prompt")
 
-    assert request.model == TextModel.GPT_4O
+    assert request.model == TextModel.GPT_5_1
     assert request.temperature == 0.7
     assert request.max_tokens is None
     assert request.system_prompt is None

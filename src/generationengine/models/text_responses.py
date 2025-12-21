@@ -1,6 +1,6 @@
 """Text generation response models."""
 
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -13,6 +13,14 @@ class TextGenerationResponse(BaseModel):
 
     success: bool = Field(..., description="Whether generation succeeded")
     content: Optional[str] = Field(None, description="Generated text content (present if success=True)")
+    parsed_content: Optional[dict[str, Any]] = Field(
+        None,
+        description="Parsed JSON content (present when structured outputs used and success=True)"
+    )
+    structured_output: bool = Field(
+        False,
+        description="Whether structured outputs was used for this generation"
+    )
     metrics: Optional[GenerationMetrics] = Field(None, description="Performance/cost tracking")
     error: Optional[GenerationError] = Field(None, description="Error details if success=False")
 
