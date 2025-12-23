@@ -109,8 +109,10 @@ class TextGenerationService:
             if request.system_prompt:
                 request_kwargs["instructions"] = request.system_prompt
             
+            # Note: max_tokens is NOT supported in Responses API (non-streaming or streaming)
+            # The Responses API doesn't have a token limit parameter
             if request.max_tokens:
-                request_kwargs["max_tokens"] = request.max_tokens
+                logger.warning("📋 [TextService] max_tokens not supported in Responses API, ignoring")
 
             # Add structured output schema if provided (Responses API format)
             if request.response_schema:
@@ -158,10 +160,11 @@ class TextGenerationService:
             usage = response.usage if hasattr(response, "usage") else None
 
             # Calculate metrics
+            # Responses API uses input_tokens/output_tokens, not prompt_tokens/completion_tokens
             duration_ms = int((time.time() - start_time) * 1000)
-            prompt_tokens = usage.prompt_tokens if usage else 0
-            completion_tokens = usage.completion_tokens if usage else 0
-            total_tokens = usage.total_tokens if usage else 0
+            prompt_tokens = getattr(usage, "input_tokens", 0) if usage else 0
+            completion_tokens = getattr(usage, "output_tokens", 0) if usage else 0
+            total_tokens = getattr(usage, "total_tokens", 0) if usage else 0
             estimated_cost = estimate_cost(request.model.value, prompt_tokens, completion_tokens)
 
             metrics = GenerationMetrics(
