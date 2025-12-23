@@ -113,3 +113,4 @@ def _clean_schema_node(schema: dict[str, Any]) -> dict[str, Any]:
 
     return schema
 
+

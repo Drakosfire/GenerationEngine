@@ -64,3 +64,4 @@ class MetricsService:
             "avg_duration_ms": total_duration / len(self._metrics),
         }
 
+
