@@ -23,20 +23,11 @@ dev = [
 ]
 
 [build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.setuptools]
-packages = [
-    "generationengine",
-    "generationengine.models",
-    "generationengine.providers",
-    "generationengine.services",
-    "generationengine.utils",
-]
-
-[tool.setuptools.package-dir]
-"" = "src"
+[tool.hatch.build.targets.wheel]
+packages = ["src/generationengine"]
 
 [tool.ruff]
 line-length = 100
