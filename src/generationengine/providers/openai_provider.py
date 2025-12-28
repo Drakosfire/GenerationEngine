@@ -5,8 +5,7 @@ import os
 from typing import Tuple
 
 try:
-    from openai import OpenAI
-    from openai import RateLimitError, APITimeoutError, APIError
+    from openai import APIError, APITimeoutError, OpenAI, RateLimitError
 except ImportError:
     OpenAI = None  # type: ignore
     RateLimitError = Exception  # type: ignore
@@ -14,7 +13,6 @@ except ImportError:
     APIError = Exception  # type: ignore
 
 from generationengine.models.errors import ErrorCode
-from generationengine.providers.base import ImageProvider
 from generationengine.services.retry_service import RetryableError
 
 
@@ -43,6 +41,8 @@ class OpenAIImageProvider:
         model: str,
         num_images: int,
         size: Tuple[int, int],
+        image_url: str | None = None,
+        strength: float | None = None,
     ) -> list[bytes]:
         """
         Generate images using OpenAI Images API.
@@ -52,6 +52,8 @@ class OpenAIImageProvider:
             model: Model identifier (should be "openai" or "gpt-image-1-mini")
             num_images: Number of images to generate (1-8)
             size: Output size as (width, height) tuple
+            image_url: Ignored - OpenAI doesn't support image-to-image via this API
+            strength: Ignored - OpenAI doesn't support image-to-image via this API
 
         Returns:
             List of image bytes (one per generated image)
@@ -59,42 +61,72 @@ class OpenAIImageProvider:
         Raises:
             RetryableError: For retryable failures (timeouts, rate limits)
             Exception: For non-retryable failures
-        """
-        # Map size tuple to OpenAI size string format
-        size_str = f"{size[0]}x{size[1]}"
 
-        # OpenAI models
-        openai_model = "gpt-image-1-mini" if model == "openai" or "mini" in model.lower() else "dall-e-3"
+        Note:
+            image_url and strength are accepted for API compatibility with other
+            providers but are ignored. OpenAI image-to-image requires a different
+            endpoint (images.edit) which is not currently implemented.
+        """
+        # Warn if image-to-image params are provided (not supported by this provider)
+        if image_url:
+            import logging
+            logging.getLogger(__name__).warning(
+                "OpenAI provider does not support image-to-image generation. "
+                "image_url parameter will be ignored."
+            )
+        # OpenAI models - determine which API to use
+        is_gpt_image = model == "openai" or "gpt-image" in model.lower() or "mini" in model.lower()
+        openai_model = "gpt-image-1-mini" if is_gpt_image else "dall-e-3"
 
         try:
             import asyncio
             from concurrent.futures import ThreadPoolExecutor
 
+            import httpx
+
             loop = asyncio.get_event_loop()
 
             # OpenAI SDK is synchronous, so we run it in a thread pool
             with ThreadPoolExecutor() as executor:
-                response = await loop.run_in_executor(
-                    executor,
-                    lambda: self.client.images.generate(
-                        model=openai_model,
-                        prompt=prompt,
-                        n=num_images,
-                        size=size_str,
-                        response_format="b64_json",  # Request base64 encoded images
-                    ),
-                )
+                if is_gpt_image:
+                    # GPT-Image API (gpt-image-1, gpt-image-1-mini, gpt-image-1.5)
+                    # - Does NOT support response_format parameter
+                    # - Returns b64_json by default
+                    # - Sizes: 1024x1024 (square), 1536x1024 (landscape), 1024x1536 (portrait)
+                    response = await loop.run_in_executor(
+                        executor,
+                        lambda: self.client.images.generate(
+                            model=openai_model,
+                            prompt=prompt,
+                            n=num_images,
+                            size="1024x1024",  # GPT-Image supports: 1024x1024, 1536x1024, 1024x1536
+                        ),
+                    )
+                else:
+                    # DALL-E API (dall-e-2, dall-e-3)
+                    # - Supports response_format
+                    # - Can return base64 or URL
+                    size_str = f"{size[0]}x{size[1]}"
+                    response = await loop.run_in_executor(
+                        executor,
+                        lambda: self.client.images.generate(
+                            model=openai_model,
+                            prompt=prompt,
+                            n=num_images,
+                            size=size_str,
+                            response_format="b64_json",
+                        ),
+                    )
 
-            # Decode base64 images to bytes
+            # Extract images from response
             images: list[bytes] = []
             for image_data in response.data:
+                # Try base64 first (DALL-E with response_format)
                 if hasattr(image_data, "b64_json") and image_data.b64_json:
                     image_bytes = base64.b64decode(image_data.b64_json)
                     images.append(image_bytes)
+                # Fall back to URL (GPT-Image or DALL-E with url format)
                 elif hasattr(image_data, "url") and image_data.url:
-                    # Fallback: download from URL if base64 not available
-                    import httpx
-
                     async with httpx.AsyncClient() as client:
                         img_response = await client.get(image_data.url)
                         img_response.raise_for_status()
