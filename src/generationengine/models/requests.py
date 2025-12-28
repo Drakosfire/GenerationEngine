@@ -9,11 +9,18 @@ from pydantic import BaseModel, Field
 class ImageModel(str, Enum):
     """AI models available for image generation."""
 
+    # Core models
     FLUX_PRO = "flux-pro"
-    IMAGEN4 = "imagen4"
-    IMAGEN4_FAST = "imagen4-fast"
     OPENAI = "openai"
-    FAL_FLUX_LORA_I2I = "flux-lora-i2i"  # Image-to-image using flux-lora
+    
+    # FAL models
+    NANO_BANANA = "nano-banana"
+    HUNYUAN = "hunyuan"
+    DREAMINA = "dreamina"
+    FLUX_KONTEXT = "flux-kontext"
+    
+    # Legacy/internal (image-to-image)
+    FAL_FLUX_LORA_I2I = "flux-lora-i2i"
 
 
 class ImageSize(str, Enum):
@@ -32,7 +39,7 @@ class ImageGenerationRequest(BaseModel):
     num_images: int = Field(4, ge=1, le=8, description="Number of images to generate (1-8)")
     size: ImageSize = Field(ImageSize.SQUARE, description="Output image dimensions")
     image_url: Optional[str] = Field(
-        None, 
+        None,
         description="Source image URL for image-to-image generation. When provided, the model transforms this image instead of generating from scratch."
     )
     strength: Optional[float] = Field(

@@ -1,20 +1,20 @@
 """Image generation service that orchestrates providers and uploads."""
 
+import json
 import time
 from datetime import datetime
 from typing import Any, Dict
 
 from generationengine.models.errors import ErrorCode
-from generationengine.models.responses import GenerationError
 from generationengine.models.image_responses import ImageGenerationResponse, ImageResult
 from generationengine.models.metrics import GenerationMetrics
-from generationengine.models.requests import ImageGenerationRequest, ImageModel
+from generationengine.models.requests import ImageGenerationRequest
+from generationengine.models.responses import GenerationError
 from generationengine.providers.base import ImageProvider
 from generationengine.providers.fal_provider import FalProvider
 from generationengine.providers.openai_provider import OpenAIImageProvider
-from generationengine.services.retry_service import retry_with_backoff, RetryableError, should_retry
+from generationengine.services.retry_service import RetryableError, retry_with_backoff, should_retry
 from generationengine.services.upload_service import UploadService
-import json
 
 
 class ImageService:
@@ -42,16 +42,18 @@ class ImageService:
         try:
             fal_provider = FalProvider(api_key=fal_api_key)
             self.providers["flux-pro"] = fal_provider
-            self.providers["imagen4"] = fal_provider
-            self.providers["imagen4-fast"] = fal_provider
             self.providers["flux-lora-i2i"] = fal_provider
-        except (ImportError, ValueError) as e:
+            self.providers["nano-banana"] = fal_provider
+            self.providers["hunyuan"] = fal_provider
+            self.providers["dreamina"] = fal_provider
+            self.providers["flux-kontext"] = fal_provider
+        except (ImportError, ValueError):
             # Fal provider not available - skip it
             pass
 
         try:
             self.providers["openai"] = OpenAIImageProvider(api_key=openai_api_key)
-        except (ImportError, ValueError) as e:
+        except (ImportError, ValueError):
             # OpenAI provider not available - skip it
             pass
 
@@ -103,7 +105,7 @@ class ImageService:
                 image_url = request.image_url if request.image_url else None
                 # Default strength to 0.85 if image_url provided but strength not specified
                 strength = request.strength if request.strength is not None else (0.85 if image_url else None)
-                
+
                 image_bytes_list = await retry_with_backoff(
                     provider.generate,
                     request.prompt,
@@ -145,7 +147,7 @@ class ImageService:
                             model_used=model_key,
                         )
                     )
-                except Exception as upload_error:
+                except Exception:
                     # If upload fails, skip this image but continue with others
                     # In production, you might want to retry or handle differently
                     continue

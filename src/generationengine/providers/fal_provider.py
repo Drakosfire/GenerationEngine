@@ -25,7 +25,9 @@ class FalProvider:
             api_key: Fal.ai API key (defaults to FAL_KEY environment variable)
         """
         if fal_client is None:
-            raise ImportError("fal-client package is required. Install with: pip install fal-client")
+            raise ImportError(
+                "fal-client package is required. Install with: pip install fal-client"
+            )
 
         self.api_key = api_key or os.getenv("FAL_KEY")
         if not self.api_key:
@@ -33,6 +35,39 @@ class FalProvider:
 
         # Set API key for fal_client
         os.environ["FAL_KEY"] = self.api_key
+
+    def _size_to_aspect_ratio(self, size: Tuple[int, int]) -> str:
+        """
+        Convert (width, height) to aspect ratio string.
+
+        Common mappings:
+        - 1024x1024 -> "1:1"
+        - 1536x1024 -> "3:2" (landscape)
+        - 1024x1536 -> "2:3" (portrait)
+        - 1792x1024 -> "16:9" (wide)
+        - 2016x1024 -> "21:9" (ultra-wide)
+        """
+        from math import gcd
+
+        width, height = size
+        divisor = gcd(width, height)
+        ratio_w = width // divisor
+        ratio_h = height // divisor
+
+        # Simplify common ratios to standard formats
+        ratio_map = {
+            (1, 1): "1:1",
+            (3, 2): "3:2",
+            (2, 3): "2:3",
+            (4, 3): "4:3",
+            (3, 4): "3:4",
+            (16, 9): "16:9",
+            (9, 16): "9:16",
+            (21, 9): "21:9",
+            (9, 21): "9:21",
+        }
+
+        return ratio_map.get((ratio_w, ratio_h), f"{ratio_w}:{ratio_h}")
 
     async def generate(
         self,
@@ -64,25 +99,41 @@ class FalProvider:
         # Map model names to Fal endpoints
         model_endpoints = {
             "flux-pro": "fal-ai/flux-pro/new",
-            "imagen4": "fal-ai/imagen4/preview",
-            "imagen4-fast": "fal-ai/imagen4/preview/fast",
             "flux-lora-i2i": "fal-ai/flux-lora/image-to-image",
+            "nano-banana": "fal-ai/nano-banana",
+            "hunyuan": "fal-ai/hunyuan-image/v3/text-to-image",
+            "dreamina": "fal-ai/bytedance/dreamina/v3.1/text-to-image",
+            "flux-kontext": "fal-ai/flux-pro/kontext/max/text-to-image",
         }
 
         endpoint = model_endpoints.get(model)
         if not endpoint:
             raise ValueError(f"Unsupported Fal model: {model}")
 
+        # Models that use aspect_ratio instead of image_size
+        aspect_ratio_models = {"nano-banana"}
+
         # Build arguments dict
-        arguments = {
-            "prompt": prompt,
-            "num_images": num_images,
-            "image_size": {
-                "width": size[0],
-                "height": size[1],
-            },
-            "enable_safety_checker": True,
-        }
+        if model in aspect_ratio_models:
+            # Nano-banana and similar models use aspect_ratio
+            aspect_ratio = self._size_to_aspect_ratio(size)
+            arguments = {
+                "prompt": prompt,
+                "num_images": num_images,
+                "aspect_ratio": aspect_ratio,
+                "output_format": "png",
+            }
+        else:
+            # Standard models use image_size
+            arguments = {
+                "prompt": prompt,
+                "num_images": num_images,
+                "image_size": {
+                    "width": size[0],
+                    "height": size[1],
+                },
+                "enable_safety_checker": True,
+            }
 
         # Add image-to-image parameters if image_url is provided
         if image_url:
@@ -93,8 +144,9 @@ class FalProvider:
                 arguments["num_inference_steps"] = 35
 
         try:
-            # Use subscribe for async operation
-            fal_result = fal_client.subscribe(
+            # Use subscribe_async for non-blocking async operation
+            # IMPORTANT: fal_client.subscribe() is BLOCKING and will freeze the event loop!
+            fal_result = await fal_client.subscribe_async(
                 endpoint,
                 arguments=arguments,
             )
