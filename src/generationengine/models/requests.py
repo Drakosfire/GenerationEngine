@@ -7,20 +7,14 @@ from pydantic import BaseModel, Field
 
 
 class ImageModel(str, Enum):
-    """AI models available for image generation."""
+    """AI models available for image generation via Fal.ai."""
 
-    # Core models
-    FLUX_PRO = "flux-pro"
-    OPENAI = "openai"
-    
-    # FAL models
-    NANO_BANANA = "nano-banana"
-    HUNYUAN = "hunyuan"
-    DREAMINA = "dreamina"
-    FLUX_KONTEXT = "flux-kontext"
-    
-    # Legacy/internal (image-to-image)
-    FAL_FLUX_LORA_I2I = "flux-lora-i2i"
+    # Primary generation models (text-to-image and inpainting)
+    FLUX_2_PRO = "flux-2-pro"  # fal-ai/flux-2-pro, fal-ai/flux-2-pro/edit
+    NANO_BANANA_PRO = "nano-banana-pro"  # fal-ai/nano-banana-pro, fal-ai/nano-banana-pro/edit
+    GPT_IMAGE_15 = "gpt-image-1.5"  # fal-ai/gpt-image-1.5, fal-ai/gpt-image-1.5/edit
+    FLUX_PRO = "flux-pro"  # fal-ai/flux-pro (text-to-image only)
+    FLUX_LORA_I2I = "flux-lora-i2i"  # fal-ai/flux-lora/image-to-image
 
 
 class ImageSize(str, Enum):
@@ -35,7 +29,12 @@ class ImageGenerationRequest(BaseModel):
     """Request model for image generation."""
 
     prompt: str = Field(..., min_length=1, max_length=2000, description="Image generation prompt")
-    model: ImageModel = Field(ImageModel.FLUX_PRO, description="Model to use for generation")
+    negative_prompt: Optional[str] = Field(
+        None,
+        max_length=1000,
+        description="Elements to exclude from the image (e.g., 'grid, text, characters'). Supported by most models."
+    )
+    model: ImageModel = Field(ImageModel.FLUX_2_PRO, description="Model to use for generation")
     num_images: int = Field(4, ge=1, le=8, description="Number of images to generate (1-8)")
     size: ImageSize = Field(ImageSize.SQUARE, description="Output image dimensions")
     image_url: Optional[str] = Field(
@@ -47,6 +46,14 @@ class ImageGenerationRequest(BaseModel):
         ge=0.0,
         le=1.0,
         description="Transformation strength for image-to-image (0.0-1.0). Higher values create more dramatic changes. Defaults to 0.85 if image_url is provided."
+    )
+    mask_base64: Optional[str] = Field(
+        None,
+        description="Base64-encoded PNG mask for inpainting. Transparent areas (alpha=0) will be generated, opaque areas (alpha=1) will be preserved. Must be provided with base_image_base64."
+    )
+    base_image_base64: Optional[str] = Field(
+        None,
+        description="Base64-encoded PNG base image for inpainting. Content will be generated within masked regions. Must be provided with mask_base64."
     )
 
     def get_size_tuple(self) -> tuple[int, int]:

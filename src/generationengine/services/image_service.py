@@ -12,7 +12,6 @@ from generationengine.models.requests import ImageGenerationRequest
 from generationengine.models.responses import GenerationError
 from generationengine.providers.base import ImageProvider
 from generationengine.providers.fal_provider import FalProvider
-from generationengine.providers.openai_provider import OpenAIImageProvider
 from generationengine.services.retry_service import RetryableError, retry_with_backoff, should_retry
 from generationengine.services.upload_service import UploadService
 
@@ -23,7 +22,6 @@ class ImageService:
     def __init__(
         self,
         fal_api_key: str | None = None,
-        openai_api_key: str | None = None,
         upload_service: UploadService | None = None,
         metrics_service: Any | None = None,  # Type is 'Any' to avoid circular import
     ):
@@ -32,7 +30,6 @@ class ImageService:
 
         Args:
             fal_api_key: Fal.ai API key (defaults to FAL_KEY env var)
-            openai_api_key: OpenAI API key (defaults to OPENAI_API_KEY env var)
             upload_service: Upload service instance (creates new one if not provided)
             metrics_service: Optional MetricsService for recording metrics
         """
@@ -41,20 +38,14 @@ class ImageService:
 
         try:
             fal_provider = FalProvider(api_key=fal_api_key)
+            # Primary models (text-to-image + inpainting via /edit endpoints)
+            self.providers["flux-2-pro"] = fal_provider
+            self.providers["nano-banana-pro"] = fal_provider
+            self.providers["gpt-image-1.5"] = fal_provider
             self.providers["flux-pro"] = fal_provider
             self.providers["flux-lora-i2i"] = fal_provider
-            self.providers["nano-banana"] = fal_provider
-            self.providers["hunyuan"] = fal_provider
-            self.providers["dreamina"] = fal_provider
-            self.providers["flux-kontext"] = fal_provider
         except (ImportError, ValueError):
             # Fal provider not available - skip it
-            pass
-
-        try:
-            self.providers["openai"] = OpenAIImageProvider(api_key=openai_api_key)
-        except (ImportError, ValueError):
-            # OpenAI provider not available - skip it
             pass
 
         # Initialize upload service
@@ -82,6 +73,8 @@ class ImageService:
             "size": request.size.value,
             "image_url": request.image_url if request.image_url else None,
             "strength": request.strength if request.strength else None,
+            "has_mask": request.mask_base64 is not None,
+            "has_base_image": request.base_image_base64 is not None,
         })
 
         try:
@@ -105,6 +98,13 @@ class ImageService:
                 image_url = request.image_url if request.image_url else None
                 # Default strength to 0.85 if image_url provided but strength not specified
                 strength = request.strength if request.strength is not None else (0.85 if image_url else None)
+                
+                # Extract inpainting parameters
+                mask_base64 = request.mask_base64 if request.mask_base64 else None
+                base_image_base64 = request.base_image_base64 if request.base_image_base64 else None
+                
+                # Extract negative prompt
+                negative_prompt = request.negative_prompt if request.negative_prompt else None
 
                 image_bytes_list = await retry_with_backoff(
                     provider.generate,
@@ -114,6 +114,9 @@ class ImageService:
                     request.get_size_tuple(),
                     image_url=image_url,
                     strength=strength,
+                    mask_base64=mask_base64,
+                    base_image_base64=base_image_base64,
+                    negative_prompt=negative_prompt,
                 )
             except RetryableError as e:
                 # Retry exhausted - return error

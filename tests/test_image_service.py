@@ -14,13 +14,13 @@ def test_image_generation_request_validation_valid():
     """Test that valid ImageGenerationRequest passes validation."""
     request = ImageGenerationRequest(
         prompt="A red dragon",
-        model=ImageModel.FLUX_PRO,
+        model=ImageModel.FLUX_2_PRO,
         num_images=4,
         size=ImageSize.SQUARE,
     )
 
     assert request.prompt == "A red dragon"
-    assert request.model == ImageModel.FLUX_PRO
+    assert request.model == ImageModel.FLUX_2_PRO
     assert request.num_images == 4
     assert request.size == ImageSize.SQUARE
 
@@ -29,7 +29,7 @@ def test_image_generation_request_defaults():
     """Test that ImageGenerationRequest uses correct defaults."""
     request = ImageGenerationRequest(prompt="A red dragon")
 
-    assert request.model == ImageModel.FLUX_PRO
+    assert request.model == ImageModel.FLUX_2_PRO
     assert request.num_images == 4
     assert request.size == ImageSize.SQUARE
 
@@ -66,18 +66,18 @@ def test_image_generation_request_get_size_tuple():
     assert request_landscape.get_size_tuple() == (1024, 768)
 
 
-def test_image_generation_request_image_to_image_fields():
-    """Test that ImageGenerationRequest accepts image-to-image parameters."""
+def test_image_generation_request_inpainting_fields():
+    """Test that ImageGenerationRequest accepts inpainting parameters."""
     request = ImageGenerationRequest(
-        prompt="Transform this image",
-        model=ImageModel.FAL_FLUX_LORA_I2I,
-        image_url="https://example.com/template.png",
-        strength=0.85,
+        prompt="Add fire effects to the masked region",
+        model=ImageModel.FLUX_2_PRO,
+        base_image_base64="data:image/png;base64,abc123",
+        mask_base64="data:image/png;base64,mask123",
     )
 
-    assert request.image_url == "https://example.com/template.png"
-    assert request.strength == 0.85
-    assert request.model == ImageModel.FAL_FLUX_LORA_I2I
+    assert request.base_image_base64 == "data:image/png;base64,abc123"
+    assert request.mask_base64 == "data:image/png;base64,mask123"
+    assert request.model == ImageModel.FLUX_2_PRO
 
 
 def test_image_generation_request_strength_validation():
@@ -105,7 +105,7 @@ def test_image_generation_response_success_valid():
                 url="https://r2.example.com/img1.png",
                 width=1024,
                 height=1024,
-                model_used="flux-pro",
+                model_used="flux-2-pro",
             )
         ],
         metrics=GenerationMetrics(duration_ms=1500),
@@ -164,12 +164,12 @@ def test_image_generation_response_shape_matches_contract():
                 url="https://r2.example.com/img1.png",
                 width=1024,
                 height=1024,
-                model_used="flux-pro",
+                model_used="flux-2-pro",
             )
         ],
         metrics=GenerationMetrics(
             duration_ms=1500,
-            model_used="flux-pro",
+            model_used="flux-2-pro",
             timestamp=datetime.now(),
         ),
     )

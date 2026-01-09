@@ -119,12 +119,10 @@ class TextGenerationService:
                 strict_schema = make_schema_strict(request.response_schema)
                 request_kwargs["text"] = {
                     "format": {
-                    "type": "json_schema",
-                    "json_schema": {
+                        "type": "json_schema",
                         "name": request.response_schema_name,
-                        "strict": True,
                         "schema": strict_schema,
-                        }
+                        "strict": True,
                     }
                 }
                 logger.info(f"📋 [TextService] Using structured outputs with schema: {request.response_schema_name}")

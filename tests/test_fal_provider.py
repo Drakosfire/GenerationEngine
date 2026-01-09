@@ -18,7 +18,7 @@ async def test_fal_provider_generate_success():
                 {"url": "https://fal.ai/tmp/img2.png", "width": 1024, "height": 1024},
             ]
         }
-        mock_fal_client.subscribe.return_value = mock_result
+        mock_fal_client.subscribe_async = AsyncMock(return_value=mock_result)
 
         # Mock httpx for image downloads
         with patch("generationengine.providers.fal_provider.httpx.AsyncClient") as mock_httpx:
@@ -30,21 +30,21 @@ async def test_fal_provider_generate_success():
             provider = FalProvider(api_key="test-key")
             result = await provider.generate(
                 prompt="A red dragon",
-                model="flux-pro",
+                model="flux-2-pro",
                 num_images=2,
                 size=(1024, 1024),
             )
 
             assert len(result) == 2
             assert all(isinstance(img, bytes) for img in result)
-            mock_fal_client.subscribe.assert_called_once()
+            mock_fal_client.subscribe_async.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_fal_provider_generate_timeout():
     """Test that Fal provider raises RetryableError on timeout."""
     with patch("generationengine.providers.fal_provider.fal_client") as mock_fal_client:
-        mock_fal_client.subscribe.side_effect = TimeoutError("Request timed out")
+        mock_fal_client.subscribe_async = AsyncMock(side_effect=TimeoutError("Request timed out"))
 
         provider = FalProvider(api_key="test-key")
 
@@ -53,7 +53,7 @@ async def test_fal_provider_generate_timeout():
         with pytest.raises(RetryableError) as exc_info:
             await provider.generate(
                 prompt="A red dragon",
-                model="flux-pro",
+                model="flux-2-pro",
                 num_images=1,
                 size=(1024, 1024),
             )
@@ -65,16 +65,16 @@ async def test_fal_provider_generate_timeout():
 
 
 @pytest.mark.asyncio
-async def test_fal_provider_image_to_image_success():
-    """Test successful image-to-image generation with Fal provider."""
+async def test_fal_provider_inpainting_flux_2_pro():
+    """Test successful inpainting with FLUX 2 Pro via /edit endpoint."""
     with patch("generationengine.providers.fal_provider.fal_client") as mock_fal_client:
         # Mock Fal response
         mock_result = {
             "images": [
-                {"url": "https://fal.ai/tmp/img1.png", "width": 768, "height": 1024},
+                {"url": "https://fal.ai/tmp/img1.png", "width": 1024, "height": 1024},
             ]
         }
-        mock_fal_client.subscribe.return_value = mock_result
+        mock_fal_client.subscribe_async = AsyncMock(return_value=mock_result)
 
         # Mock httpx for image downloads
         with patch("generationengine.providers.fal_provider.httpx.AsyncClient") as mock_httpx:
@@ -85,32 +85,29 @@ async def test_fal_provider_image_to_image_success():
 
             provider = FalProvider(api_key="test-key")
             result = await provider.generate(
-                prompt="A red dragon",
-                model="flux-lora-i2i",
+                prompt="Add a dragon",
+                model="flux-2-pro",
                 num_images=1,
-                size=(768, 1024),
-                image_url="https://example.com/template.png",
-                strength=0.85,
+                size=(1024, 1024),
+                base_image_base64="data:image/png;base64,abc123",
             )
 
             assert len(result) == 1
             assert all(isinstance(img, bytes) for img in result)
             
-            # Verify fal_client.subscribe was called with image-to-image parameters
-            mock_fal_client.subscribe.assert_called_once()
-            call_args = mock_fal_client.subscribe.call_args
-            assert call_args[0][0] == "fal-ai/flux-lora/image-to-image"
-            assert call_args[1]["arguments"]["image_url"] == "https://example.com/template.png"
-            assert call_args[1]["arguments"]["strength"] == 0.85
-            assert call_args[1]["arguments"]["num_inference_steps"] == 35
+            # Verify fal_client.subscribe_async was called with inpainting endpoint
+            mock_fal_client.subscribe_async.assert_called_once()
+            call_args = mock_fal_client.subscribe_async.call_args
+            assert call_args[0][0] == "fal-ai/flux-2-pro/edit"
+            assert call_args[1]["arguments"]["image_urls"] == ["data:image/png;base64,abc123"]
 
 
 @pytest.mark.asyncio
-async def test_fal_provider_image_to_image_endpoint_mapping():
-    """Test that flux-lora-i2i model maps to correct endpoint."""
+async def test_fal_provider_inpainting_gpt_image_15():
+    """Test inpainting with GPT Image 1.5 via /edit endpoint with mask."""
     with patch("generationengine.providers.fal_provider.fal_client") as mock_fal_client:
         mock_result = {"images": [{"url": "https://fal.ai/tmp/img1.png"}]}
-        mock_fal_client.subscribe.return_value = mock_result
+        mock_fal_client.subscribe_async = AsyncMock(return_value=mock_result)
 
         with patch("generationengine.providers.fal_provider.httpx.AsyncClient") as mock_httpx:
             mock_get = AsyncMock()
@@ -120,14 +117,17 @@ async def test_fal_provider_image_to_image_endpoint_mapping():
 
             provider = FalProvider(api_key="test-key")
             await provider.generate(
-                prompt="test",
-                model="flux-lora-i2i",
+                prompt="Add fire effects",
+                model="gpt-image-1.5",
                 num_images=1,
-                size=(768, 1024),
-                image_url="https://example.com/img.png",
+                size=(1024, 1024),
+                base_image_base64="data:image/png;base64,base",
+                mask_base64="data:image/png;base64,mask",
             )
 
-            # Verify correct endpoint was called
-            call_args = mock_fal_client.subscribe.call_args
-            assert call_args[0][0] == "fal-ai/flux-lora/image-to-image"
+            # Verify correct endpoint and mask parameter
+            call_args = mock_fal_client.subscribe_async.call_args
+            assert call_args[0][0] == "fal-ai/gpt-image-1.5/edit"
+            assert call_args[1]["arguments"]["image_urls"] == ["data:image/png;base64,base"]
+            assert call_args[1]["arguments"]["mask_image_url"] == "data:image/png;base64,mask"
 

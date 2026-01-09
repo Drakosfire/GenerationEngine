@@ -43,6 +43,9 @@ class OpenAIImageProvider:
         size: Tuple[int, int],
         image_url: str | None = None,
         strength: float | None = None,
+        mask_base64: str | None = None,
+        base_image_base64: str | None = None,
+        negative_prompt: str | None = None,
     ) -> list[bytes]:
         """
         Generate images using OpenAI Images API.
@@ -54,6 +57,9 @@ class OpenAIImageProvider:
             size: Output size as (width, height) tuple
             image_url: Ignored - OpenAI doesn't support image-to-image via this API
             strength: Ignored - OpenAI doesn't support image-to-image via this API
+            mask_base64: Ignored - OpenAI inpainting requires images.edit endpoint
+            base_image_base64: Ignored - OpenAI inpainting requires images.edit endpoint
+            negative_prompt: Ignored - OpenAI native API doesn't support negative prompts
 
         Returns:
             List of image bytes (one per generated image)
@@ -63,9 +69,9 @@ class OpenAIImageProvider:
             Exception: For non-retryable failures
 
         Note:
-            image_url and strength are accepted for API compatibility with other
-            providers but are ignored. OpenAI image-to-image requires a different
-            endpoint (images.edit) which is not currently implemented.
+            image_url, strength, mask_base64, base_image_base64, and negative_prompt
+            are accepted for API compatibility with other providers but are ignored.
+            OpenAI image-to-image requires a different endpoint (images.edit).
         """
         # Warn if image-to-image params are provided (not supported by this provider)
         if image_url:
