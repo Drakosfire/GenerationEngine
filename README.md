@@ -1,15 +1,30 @@
 # GenerationEngine
 
-Unified generation infrastructure for DungeonMind generators.
+Provider-agnostic inference execution for DungeonMind products.
+
+## Status (E2A)
+
+This package is a **real in-process capability** with DungeonMindServer consumers, not a greenfield service.
+
+E2A defines the target product-neutral contract. It does **not** implement that contract. The examples below describe the **current compatibility API**. Several README claims (dual image providers, `TextModel.GPT_4O`, optional Cloudflare) do not match implemented behavior; see the current-state audit.
+
+| Document | Role |
+| --- | --- |
+| [docs/CURRENT-STATE.md](docs/CURRENT-STATE.md) | Claimed vs implemented; consumer inventory |
+| [docs/CORE-CONTRACT.md](docs/CORE-CONTRACT.md) | Target capabilities, profiles, observations, failures |
+| [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) | Exports that must survive until E3 |
+| [docs/E2-SUCCESSOR-SLICES.md](docs/E2-SUCCESSOR-SLICES.md) | E2B–E2E sequence |
+
+GenerationEngine owns inference execution and inference-call truth. Products own prompts, schemas, workflows, and artifact persistence.
 
 ## Overview
 
-GenerationEngine provides a consistent interface for AI-powered generation services across DungeonMind, including:
+Current compatibility capabilities:
 
-- **Image Generation**: Unified image generation via Fal.ai and OpenAI DALL-E
-- **Text Generation**: Structured and streaming text generation via OpenAI Responses API
-- **Metrics Tracking**: Built-in telemetry for generation performance and costs
-- **Error Handling**: Robust retry logic with exponential backoff
+- **Image Generation**: Fal.ai models via `ImageService` (OpenAI image provider exists but is not wired; Cloudflare upload is currently mandatory)
+- **Text Generation**: Structured and streaming text via OpenAI Responses API (`AsyncOpenAI` is constructed directly)
+- **Metrics Tracking**: In-memory `GenerationMetrics` stub (not yet `InferenceObservation`)
+- **Error Handling**: Retry with exponential backoff around current error codes
 
 ## Installation
 
