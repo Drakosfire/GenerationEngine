@@ -6,13 +6,13 @@ Provider-agnostic inference execution for DungeonMind products.
 
 This package is a **real in-process capability** with DungeonMindServer consumers, not a greenfield service.
 
-E2A defines the target product-neutral contract. It does **not** implement that contract. The examples below describe the **current compatibility API**. Several README claims (dual image providers, `TextModel.GPT_4O`, optional Cloudflare) do not match implemented behavior; see the current-state audit.
+E2A defines the target product-neutral contract. It does **not** implement that contract. The examples below match the **implemented** compatibility API as of baseline `f6f0fa95` (not the E2 target). Remaining claimed-vs-wired gaps (unwired OpenAI image provider, Fal packaging) are in [docs/CURRENT-STATE.md](docs/CURRENT-STATE.md).
 
 | Document | Role |
 | --- | --- |
 | [docs/CURRENT-STATE.md](docs/CURRENT-STATE.md) | Claimed vs implemented; consumer inventory |
 | [docs/CORE-CONTRACT.md](docs/CORE-CONTRACT.md) | Target capabilities, profiles, observations, failures |
-| [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) | Exports that must survive until E3 |
+| [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) | Consumer seams vs historical `__all__` |
 | [docs/E2-SUCCESSOR-SLICES.md](docs/E2-SUCCESSOR-SLICES.md) | E2B–E2E sequence |
 
 GenerationEngine owns inference execution and inference-call truth. Products own prompts, schemas, workflows, and artifact persistence.
@@ -64,7 +64,7 @@ request = ImageGenerationRequest(
     num_images=1
 )
 
-response = await service.generate(request, service_name="myapp")
+response = await service.generate(request)
 if response.success:
     print(f"Generated image: {response.images[0].url}")
 ```
@@ -79,7 +79,7 @@ service = TextGenerationService()
 request = TextGenerationRequest(
     system_prompt="You are a helpful assistant.",
     user_prompt="What is a statblock?",
-    model=TextModel.GPT_4O,
+    model=TextModel.GPT_5_1,
     temperature=0.7
 )
 
@@ -91,7 +91,7 @@ if response.success:
 ### Streaming Text Generation
 
 ```python
-async for chunk in service.generate_stream(request, service_name="myapp"):
+async for chunk in service.generate_stream(request):
     print(chunk, end="", flush=True)
 ```
 
@@ -108,7 +108,7 @@ schema = Creature.model_json_schema()
 
 request = TextGenerationRequest(
     user_prompt="Generate a creature named Bob at level 5",
-    model=TextModel.GPT_4O,
+    model=TextModel.GPT_5_1,
     response_schema=schema,
     response_schema_name="Creature"
 )
@@ -121,18 +121,20 @@ if response.success and response.parsed_content:
 
 ## Requirements
 
+Current constructor/runtime requirements (target optionality is E2D, not current behavior):
+
 - Python >= 3.11
-- OpenAI API key (for text generation)
-- Fal.ai API key (optional, for image generation)
-- Cloudflare API credentials (optional, for image uploads)
+- OpenAI API key to construct `TextGenerationService`
+- Cloudflare Images credentials to construct `ImageService` / `UploadService`
+- Fal.ai API key for `ImageService` to register any image providers (`fal-client` is currently undeclared; consumers often supply it)
 
 ## Environment Variables
 
 ```bash
 OPENAI_API_KEY=your_openai_key
-FAL_KEY=your_fal_key  # Optional
-CLOUDFLARE_ACCOUNT_ID=your_account_id  # Optional
-CLOUDFLARE_API_TOKEN=your_api_token  # Optional
+FAL_KEY=your_fal_key
+CLOUDFLARE_ACCOUNT_ID=your_account_id
+CLOUDFLARE_IMAGES_API_TOKEN=your_api_token
 ```
 
 ## License

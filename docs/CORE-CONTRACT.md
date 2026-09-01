@@ -2,7 +2,7 @@
 
 **Status:** ACCEPTED design for E2 implementation. Not implemented by E2A.  
 **Current behavior:** [CURRENT-STATE.md](CURRENT-STATE.md)  
-**Compatibility until E3:** [COMPATIBILITY.md](COMPATIBILITY.md)
+**Compatibility:** [COMPATIBILITY.md](COMPATIBILITY.md) — consumer seams until E3; unused baseline exports may change in E2
 
 GenerationEngine is an in-process inference capability. It is not a product backend, not a network service, and not an Agent runtime.
 
@@ -274,7 +274,7 @@ TextFailed(failure, observation)
 
 Product backends translate those events into SSE, WebSocket, CLI, or other transports.
 
-The current `generate_stream` SSE strings are a **compatibility facade** until E3 shows no remaining caller. E2C introduces internal transport-neutral events and may keep an SSE adapter beside the facade. E2A does not remove SSE behavior.
+E2A already found no DungeonMindServer caller of `generate_stream`. E2C may replace SSE framing with transport-neutral events. An SSE adapter is optional, not an E3-protected facade. E2A does not remove the current method.
 
 ---
 
@@ -347,9 +347,17 @@ Do not create separate provider packages in E2 unless the extras model proves in
 
 E2A defines the target. It does not replace current DungeonMindServer imports.
 
-Current exports are compatibility surfaces until E3 migrates consumers. See [COMPATIBILITY.md](COMPATIBILITY.md).
+Preserve **demonstrated consumer imports and return shapes** until E3 migrates those callers. See [COMPATIBILITY.md](COMPATIBILITY.md).
 
-Rule: transition before demolition. Keep facades. Do not delete URL-returning image generate, SSE `generate_stream`, or current request types because a better contract exists on paper.
+Historical `__all__` entries with no consumer are baseline inventory, not an E3 freeze. E2B may retire unused product-tainted surfaces such as `IGenerator`.
+
+Rule: transition before demolition applies to live seams:
+
+```text
+keep URL-returning ImageService.generate while Server still consumes .url
+keep TextGenerationService / TextGenerationRequest / TextModel while Server imports them
+do not keep generate_stream SSE or IGenerator merely because they exist on the package
+```
 
 ---
 

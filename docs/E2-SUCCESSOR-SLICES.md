@@ -17,7 +17,8 @@ InferenceObservation type matching CORE-CONTRACT §5
 model/catalog/pricing authority skeleton (shape + empty/minimal records, not a product policy dump)
 generic profile vocabulary as data, not product names
 TextProvider / ImageProvider protocols in core (no SDK rewrite yet)
-compatibility types remain importable
+consumer-required imports and return shapes remain importable
+unused baseline exports (IGenerator, GenerationResponse, RetryableError, …) may be retired
 ```
 
 No consumer migration. No live provider wiring change.
@@ -28,9 +29,9 @@ No consumer migration. No live provider wiring change.
 
 ```text
 move AsyncOpenAI behind TextProvider
-preserve TextGenerationService / TextGenerationRequest / TextModel as facades
+preserve TextGenerationService / TextGenerationRequest / TextModel as consumer facades
 transport-neutral stream events internally
-optional SSE adapter for the current generate_stream facade
+optional SSE adapter only if useful; generate_stream has no Server caller
 normalize usage, request IDs, failures, latency, retry_count
 remove MODEL_PRICING from the text service; read the catalog
 keep current GPT-5.1 effective selection for compatibility callers unless a facade test proves otherwise

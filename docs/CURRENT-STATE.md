@@ -40,14 +40,14 @@ pytest: installed because it is a runtime dependency (packaging smell)
 
 | README / type claim | Implemented today |
 | --- | --- |
-| Image generation via Fal.ai **and** OpenAI DALL-E | `OpenAIImageProvider` exists. `ImageService` registers only `FalProvider` against Fal model IDs. OpenAI image provider is unwired. |
+| Image generation via Fal.ai **and** OpenAI DALL-E | Pre-E2A README claimed both. `OpenAIImageProvider` exists; `ImageService` registers only `FalProvider`. Overview now states the unwired OpenAI path. |
 | Text generation via OpenAI Responses API | True. `TextGenerationService` constructs `AsyncOpenAI` directly. No `TextProvider` protocol. |
-| README example uses `TextModel.GPT_4O` | `TextModel` has only `GPT_5_1 = "gpt-5.1"`. The documented example is stale. |
-| Cloudflare credentials optional | `ImageService()` always constructs `UploadService()` unless injected. `UploadService` requires `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_IMAGES_API_TOKEN` at init. Image construction therefore requires Cloudflare even when no image call is made. |
-| Fal.ai optional | `FalProvider` imports `fal_client` and raises `ImportError` if missing. `fal-client` is not a package dependency. ImageService swallows Fal init failure and continues with an empty provider map, then still requires Cloudflare. |
+| Text model in examples | E2A README uses `TextModel.GPT_5_1`, matching the only enum member. Pre-E2A examples used non-existent `GPT_4O`. |
+| Cloudflare credentials | E2A README states they are required to construct `ImageService`. `UploadService` requires `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_IMAGES_API_TOKEN` at init. Target optionality is E2D. |
+| Fal.ai | Required for `ImageService` to register providers. `fal-client` is still undeclared; missing Fal leaves an empty provider map after Cloudflare construction succeeds. |
 | Metrics tracking | `GenerationMetrics` plus in-memory `MetricsService` stub. Full system prompt (text) / full image prompt stored in `input`. No provider, request ID, cached tokens, response model, or normalized failure state. |
 | Robust retry with exponential backoff | `retry_with_backoff` exists (3 attempts, 1s/2s/4s). Text success path never records actual retry count (`retry_count` stays `0`, or is hard-coded to `3` after exhaustion). |
-| `IGenerator.generator_type` documents `statblock`, `card`, `character`, `store` | Product vocabulary in the shared protocol. No production `IGenerator` implementer in this package. |
+| `IGenerator.generator_type` documents `statblock`, `card`, `character`, `store` | Product vocabulary in the shared protocol. No production implementer. Baseline inventory, not a consumer seam; E2B may retire it. |
 
 ---
 
@@ -263,5 +263,5 @@ tracked bytecode / no gitignore / no CI
 pytest in runtime dependencies
 ruff extra not installed by default sync
 4 failing tests on clean baseline
-README examples/claims drift (GPT_4O, optional Cloudflare, dual image providers)
+README examples corrected in E2A to GPT_5_1 / real signatures / required Cloudflare; remaining advertised-vs-wired gap is Fal-only ImageService vs unused OpenAI image provider
 ```
