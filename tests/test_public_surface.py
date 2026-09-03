@@ -70,6 +70,9 @@ def test_target_primitives_are_exported() -> None:
         "ModelRecord",
         "TextProvider",
         "ImageProvider",
+        "TextCompleted",
+        "TextFailed",
+        "TextStreamEvent",
     ):
         assert name in ge.__all__, name
         assert hasattr(ge, name), name

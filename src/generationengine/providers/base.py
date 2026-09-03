@@ -7,10 +7,13 @@ execution behind them.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import Any, Protocol, Tuple
+from typing import Any, Protocol, Tuple, Union
 
 from pydantic import BaseModel, Field
 from typing_extensions import runtime_checkable
+
+from generationengine.failures import InferenceFailure
+from generationengine.observation import InferenceObservation
 
 
 class TextGenerationCall(BaseModel):
@@ -26,6 +29,19 @@ class TextGenerationCall(BaseModel):
 
 class TextDelta(BaseModel):
     text: str
+
+
+class TextCompleted(BaseModel):
+    final_text: str
+    observation: InferenceObservation
+
+
+class TextFailed(BaseModel):
+    failure: InferenceFailure
+    observation: InferenceObservation
+
+
+TextStreamEvent = Union[TextDelta, TextCompleted, TextFailed]
 
 
 class TextGenerationResult(BaseModel):
@@ -47,8 +63,8 @@ class TextProvider(Protocol):
         """Return a completed text result."""
         ...
 
-    def stream(self, call: TextGenerationCall) -> AsyncIterator[TextDelta]:
-        """Yield transport-neutral text deltas. Not SSE strings."""
+    def stream(self, call: TextGenerationCall) -> AsyncIterator[TextStreamEvent]:
+        """Yield transport-neutral stream events ending in TextCompleted or TextFailed."""
         ...
 
 

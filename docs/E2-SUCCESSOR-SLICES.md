@@ -6,7 +6,7 @@ See `docs/CORE-CONTRACT.md` and `docs/CURRENT-STATE.md`.
 
 ## E2B — Trustworthy core primitives (this PR)
 
-Landed: clean install/CI, `InferenceObservation`, `FailureCode`, catalog/profiles, `TextProvider`/`ImageProvider`, prompt-free legacy metrics, dead-API removal.
+Landed: clean install/CI, `InferenceObservation`, `FailureCode`, catalog/profiles, `TextProvider`/`ImageProvider` (including `TextCompleted`/`TextFailed` stream terminals), prompt-free legacy metrics, dead-API removal, `openai` as optional extra with provider-free wheel import proof.
 
 Active DungeonMindServer imports were not migrated. That is sequencing, not a compatibility promise.
 

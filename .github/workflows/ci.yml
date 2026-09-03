@@ -20,10 +20,24 @@ jobs:
       - name: Lockfile
         run: uv lock --check
       - name: Install
-        run: uv sync --group dev
+        run: uv sync --group dev --extra openai --extra fal
       - name: Ruff
         run: uv run ruff check .
       - name: Tests
         run: uv run pytest -q
       - name: Build
         run: uv build
+      - name: Provider-free wheel import
+        run: |
+          WHEEL="$(ls -1 dist/*.whl | head -1)"
+          uv venv /tmp/ge-wheel-test
+          uv pip install --python /tmp/ge-wheel-test/bin/python "$WHEEL"
+          /tmp/ge-wheel-test/bin/python - <<'PY'
+          import generationengine as ge
+
+          assert ge.__version__
+          assert "TextGenerationService" in ge.__all__
+          assert "InferenceObservation" in ge.__all__
+          assert "TextCompleted" in ge.__all__
+          assert "TextFailed" in ge.__all__
+          PY

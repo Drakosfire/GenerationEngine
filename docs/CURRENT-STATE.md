@@ -1,8 +1,48 @@
-# GenerationEngine current state (E2A characterization)
+# GenerationEngine current state
 
-**Baseline:** `f6f0fa95c745e4201785f3cf1d29d853e603a592` (`feat(GenerationEngine): add inpainting and mask support`, 2026-01-09)  
+**E2B branch:** trustworthy core primitives (see below)  
+**E2A baseline commit:** `f6f0fa95c745e4201785f3cf1d29d853e603a592`  
+**Target contract:** [CORE-CONTRACT.md](CORE-CONTRACT.md)  
+**Cutover inventory:** [COMPATIBILITY.md](COMPATIBILITY.md)
+
+This file separates **E2B current repo truth** from the **E2A baseline audit** preserved below for cutover evidence.
+
+---
+
+## E2B current truth (this PR)
+
+```text
+CI: .github/workflows/ci.yml on 3.11 + 3.13, credential-free
+tests: 80+ passing after baseline fixture repairs
+tracked bytecode: 0
+core deps: pydantic, httpx, tenacity
+openai extra: openai (not core)
+fal extra: fal-client
+dev group: pytest, pytest-asyncio, ruff
+provider-free wheel import: CI step + local test prove core-only install imports generationengine
+package root: lazy-loads TextGenerationService and ImageService
+primitives: InferenceObservation, FailureCode, catalog/profiles, TextProvider/ImageProvider
+stream contract: TextDelta, TextCompleted, TextFailed (terminal events required)
+legacy metrics: prompt bodies no longer stored; lengths/schema hash only
+removed public API: IGenerator, GenerationResponse, package-root RetryableError/is_retryable/make_schema_strict
+live execution: still pre-cutover TextGenerationService/ImageService (OpenAI/Fal/Cloudflare paths unchanged)
+```
+
+What E2B does **not** claim:
+
+```text
+OpenAI/Fal execution moved behind TextProvider/ImageProvider yet
+InferenceObservation populated on live paths yet
+DungeonMindServer consumers migrated
+long-lived compatibility architecture for old GE surfaces
+```
+
+---
+
+## E2A baseline audit (historical; pre-E2B)
+
 **Characterization date:** 2026-08-31  
-**This document describes implemented behavior.** The target contract is [CORE-CONTRACT.md](CORE-CONTRACT.md). Do not treat this file as desired architecture.
+The sections below describe the repository **before E2B**. Do not treat them as current packaging or test status.
 
 ---
 

@@ -1,5 +1,10 @@
 """DungeonMind GenerationEngine - provider-agnostic inference execution."""
 
+from __future__ import annotations
+
+import importlib
+from typing import Any
+
 from generationengine.catalog import (
     ACCEPTED_CAPABILITIES,
     ACCEPTED_PROFILES,
@@ -24,16 +29,31 @@ from generationengine.models.text_responses import TextGenerationResponse
 from generationengine.observation import InferenceObservation, ObservationState
 from generationengine.providers.base import (
     ImageProvider,
+    TextCompleted,
     TextDelta,
+    TextFailed,
     TextGenerationCall,
     TextGenerationResult,
     TextProvider,
+    TextStreamEvent,
 )
-from generationengine.services.image_service import ImageService
 from generationengine.services.metrics_service import MetricsService
-from generationengine.services.text_service import TextGenerationService
 
 __version__ = "0.1.0"
+
+_LAZY_EXPORTS: dict[str, tuple[str, str]] = {
+    "ImageService": ("generationengine.services.image_service", "ImageService"),
+    "TextGenerationService": ("generationengine.services.text_service", "TextGenerationService"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name in _LAZY_EXPORTS:
+        module_name, attr_name = _LAZY_EXPORTS[name]
+        module = importlib.import_module(module_name)
+        return getattr(module, attr_name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "ACCEPTED_CAPABILITIES",
@@ -57,7 +77,9 @@ __all__ = [
     "ObservationState",
     "PricingDimension",
     "Retryability",
+    "TextCompleted",
     "TextDelta",
+    "TextFailed",
     "TextGenerationCall",
     "TextGenerationRequest",
     "TextGenerationResponse",
@@ -65,4 +87,5 @@ __all__ = [
     "TextGenerationService",
     "TextModel",
     "TextProvider",
+    "TextStreamEvent",
 ]
