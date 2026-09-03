@@ -1,8 +1,8 @@
 """Tests for retry service with exponential backoff."""
 
-import asyncio
-import pytest
 import time
+
+import pytest
 
 from generationengine.models.errors import ErrorCode
 from generationengine.services.retry_service import RetryableError, retry_with_backoff, should_retry
@@ -94,9 +94,9 @@ def test_should_retry_non_retryable_codes():
 async def test_retry_on_provider_timeout():
     """T053: Unit test for retry on PROVIDER_TIMEOUT."""
     failing_function.call_count = 0
-    
+
     result = await retry_with_backoff(failing_function, ErrorCode.PROVIDER_TIMEOUT, fail_count=2)
-    
+
     assert result == "success"
     assert failing_function.call_count == 3  # Initial + 2 retries
 
@@ -105,9 +105,9 @@ async def test_retry_on_provider_timeout():
 async def test_retry_on_rate_limited():
     """T054: Unit test for retry on RATE_LIMITED."""
     failing_function.call_count = 0
-    
+
     result = await retry_with_backoff(failing_function, ErrorCode.RATE_LIMITED, fail_count=1)
-    
+
     assert result == "success"
     assert failing_function.call_count == 2  # Initial + 1 retry
 
@@ -118,19 +118,19 @@ async def test_no_retry_on_invalid_input():
     async def raise_invalid_input():
         """Function that raises a non-retryable error."""
         raise RetryableError(ErrorCode.INVALID_INPUT, "Invalid input provided")
-    
+
     # Since INVALID_INPUT is not retryable, but we're raising RetryableError,
     # the retry decorator will still retry it (because it checks exception type, not error code).
     # However, in practice, services should not raise RetryableError for non-retryable codes.
     # This test verifies that non-retryable errors should not be wrapped in RetryableError.
-    
+
     # Instead, let's test that should_retry correctly identifies INVALID_INPUT as non-retryable
     assert should_retry(ErrorCode.INVALID_INPUT) is False
-    
+
     # And verify that if a non-RetryableError exception is raised, it's not retried
     async def raise_value_error():
         raise ValueError("Invalid input")
-    
+
     with pytest.raises(ValueError):
         await retry_with_backoff(raise_value_error)
 

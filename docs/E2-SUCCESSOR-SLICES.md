@@ -1,84 +1,46 @@
 # E2 successor slices
 
-E2A is characterization and contract design only. Implementation follows in attributable slices. Do not merge E2B–E2E into one PR.
+## E2A — Characterize and define the contract (merged)
 
----
+See `docs/CORE-CONTRACT.md` and `docs/CURRENT-STATE.md`.
 
-## E2B — Trustworthy core primitives and repository baseline
+## E2B — Trustworthy core primitives (this PR)
 
-```text
-.gitignore and stop tracking bytecode
-GitHub Actions: lock check, pytest, ruff, build on a clean install
-move pytest off the runtime dependency list
-installable extras skeleton (openai / fal / dev)
-fix the 4 pre-existing baseline test failures (RateLimitError mock; MagicMock usage JSON)
-normalized failure types matching CORE-CONTRACT §6
-InferenceObservation type matching CORE-CONTRACT §5
-model/catalog/pricing authority skeleton (shape + empty/minimal records, not a product policy dump)
-generic profile vocabulary as data, not product names
-TextProvider / ImageProvider protocols in core (no SDK rewrite yet)
-consumer-required imports and return shapes remain importable
-unused baseline exports (IGenerator, GenerationResponse, RetryableError, …) may be retired
-```
+Landed: clean install/CI, `InferenceObservation`, `FailureCode`, catalog/profiles, `TextProvider`/`ImageProvider`, prompt-free legacy metrics, dead-API removal.
 
-No consumer migration. No live provider wiring change.
+Active DungeonMindServer imports were not migrated. That is sequencing, not a compatibility promise.
 
----
+## Next — Coordinated flag-day cutover
 
-## E2C — Provider-neutral text execution
+One controlled GenerationEngine + DungeonMindServer change:
 
 ```text
-move AsyncOpenAI behind TextProvider
-preserve TextGenerationService / TextGenerationRequest / TextModel as consumer facades
-transport-neutral stream events internally
-optional SSE adapter only if useful; generate_stream has no Server caller
-normalize usage, request IDs, failures, latency, retry_count
-remove MODEL_PRICING from the text service; read the catalog
-keep current GPT-5.1 effective selection for compatibility callers unless a facade test proves otherwise
+GenerationEngine
+  move OpenAI behind TextProvider
+  provider-neutral text / structured generation
+  transport-neutral streaming (delete SSE core surface)
+  truthful InferenceObservation population
+  artifact-free image generation/editing
+  truthful Fal/OpenAI wiring
+  remove Cloudflare persistence from inference core
+
+DungeonMindServer
+  migrate every GE consumer
+  own action -> generic profile mapping
+  own Cloudflare / durable artifact persistence
+  migrate appropriate direct provider calls
+
+then immediately
+  delete old GE facades
+  delete legacy metrics/errors/responses
+  delete stale TextModel/MODEL_PRICING
+  delete UploadService from inference core
 ```
 
-No DungeonMindServer migration unless a tiny in-repo compatibility proof requires it. E3 owns real consumers.
+The running deployed instance is untouched until that development state is proven and deliberately deployed.
 
----
+There is no E3 compatibility period for the old GenerationEngine contract.
 
-## E2D — Artifact-decoupled image execution
+## After cutover — settling
 
-```text
-image generate/edit returns GeneratedImage without Cloudflare
-make advertised provider wiring truthful (Fal extra + OpenAI image provider registration policy)
-fal-client as a real optional extra
-ImageService URL-returning path remains as compatibility adapter
-normalized image observations and failures
-text-only construction does not require Fal or Cloudflare
-```
-
-Do not opportunistically change which Fal model IDs current Server callers use.
-
----
-
-## E2E — GenerationEngine internal readiness
-
-```text
-fresh-install capability proof (text extra, image extra, both, neither)
-fake-provider contract tests
-text + structured + stream + image/edit tests
-pricing/cost tests including unknown vs zero
-failure/retry tests
-no product-domain vocabulary in core profiles/contracts
-README truthful: current compatibility API vs implemented target
-```
-
-After E2E, E3 migrates real DungeonMindServer paths. Settling Gate G follows E3 proofs.
-
----
-
-## Attribution from E2A evidence
-
-The default sequence above is confirmed, not replaced:
-
-- Test/CI/hygiene rot is a baseline-trust problem → **E2B**, not the provider rewrite.
-- Direct `AsyncOpenAI` and SSE framing are text-execution problems → **E2C**.
-- Fal wiring vs README, missing `fal-client`, Cloudflare coupling → **E2D**.
-- README/install truth and fake-provider proofs need the primitives first → **E2E**.
-
-Do not start E3 until E2E says the package is worthy of real consumers.
+Clean-install matrices, fake-provider contract proofs, DungeonMindServer integration, documentation truth, Gate G.

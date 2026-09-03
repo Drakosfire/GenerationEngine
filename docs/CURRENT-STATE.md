@@ -47,7 +47,7 @@ pytest: installed because it is a runtime dependency (packaging smell)
 | Fal.ai | Required for `ImageService` to register providers. `fal-client` is still undeclared; missing Fal leaves an empty provider map after Cloudflare construction succeeds. |
 | Metrics tracking | `GenerationMetrics` plus in-memory `MetricsService` stub. Full system prompt (text) / full image prompt stored in `input`. No provider, request ID, cached tokens, response model, or normalized failure state. |
 | Robust retry with exponential backoff | `retry_with_backoff` exists (3 attempts, 1s/2s/4s). Text success path never records actual retry count (`retry_count` stays `0`, or is hard-coded to `3` after exhaustion). |
-| `IGenerator.generator_type` documents `statblock`, `card`, `character`, `store` | Product vocabulary in the shared protocol. No production implementer. Baseline inventory, not a consumer seam; E2B may retire it. |
+| `IGenerator.generator_type` | Removed in E2B. No DungeonMindServer consumer. |
 
 ---
 
@@ -113,10 +113,12 @@ normalized completion/failure state
 failure_code
 ```
 
-Retention:
+Retention (E2B):
 
-- text `input` JSON includes the **full system prompt** and user-prompt **length**
-- image `input` JSON includes the **full prompt**
+- text metrics `input` JSON includes prompt **lengths**, model, temperature, optional schema name/hash — not prompt bodies
+- image metrics `input` JSON includes `image_prompt_length` and mode flags — not prompt bodies
+- `InferenceObservation` is the target type and has no prompt/response fields
+- live execution still records `GenerationMetrics`; it does not yet populate `InferenceObservation`
 - text `output` JSON includes content length and token counts (when serializable)
 
 MagicMock usage objects make `json.dumps` of token fields raise, and the service collapses that into `INTERNAL_ERROR`. That is why three text-service tests fail on a clean baseline (see Tests below).
@@ -254,9 +256,8 @@ TextModel / pricing limited to gpt-5.1
 Fal-only ImageService wiring despite OpenAIImageProvider
 undeclared fal-client
 mandatory Cloudflare uploader construction
-product vocabulary on IGenerator.generator_type
+product vocabulary on IGenerator.generator_type (removed in E2B)
 SSE framing and [DONE]/[ERROR] sentinels inside the engine
-prompt retention in GenerationMetrics.input
 retry_count not observed from actual attempts
 structured parse failure reported as success
 tracked bytecode / no gitignore / no CI

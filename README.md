@@ -12,7 +12,7 @@ E2A defines the target product-neutral contract. It does **not** implement that 
 | --- | --- |
 | [docs/CURRENT-STATE.md](docs/CURRENT-STATE.md) | Claimed vs implemented; consumer inventory |
 | [docs/CORE-CONTRACT.md](docs/CORE-CONTRACT.md) | Target capabilities, profiles, observations, failures |
-| [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) | Consumer seams vs historical `__all__` |
+| [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) | Cutover inventory, not a long-lived API promise |
 | [docs/E2-SUCCESSOR-SLICES.md](docs/E2-SUCCESSOR-SLICES.md) | E2B–E2E sequence |
 
 GenerationEngine owns inference execution and inference-call truth. Products own prompts, schemas, workflows, and artifact persistence.
@@ -23,8 +23,8 @@ Current compatibility capabilities:
 
 - **Image Generation**: Fal.ai models via `ImageService` (OpenAI image provider exists but is not wired; Cloudflare upload is currently mandatory)
 - **Text Generation**: Structured and streaming text via OpenAI Responses API (`AsyncOpenAI` is constructed directly)
-- **Metrics Tracking**: In-memory `GenerationMetrics` stub (not yet `InferenceObservation`)
-- **Error Handling**: Retry with exponential backoff around current error codes
+- **Metrics Tracking**: In-memory `GenerationMetrics` with bounded input metadata; `InferenceObservation` is the target type
+- **Error Handling**: Current `ErrorCode` on live paths; `FailureCode` / `Retryability` primitives exist for the cutover
 
 ## Installation
 

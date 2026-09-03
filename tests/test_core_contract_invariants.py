@@ -39,7 +39,7 @@ REQUIRED_CONTRACT_HEADINGS = (
     "Structured output",
     "Image generation vs artifact persistence",
     "Credentials and optional capabilities",
-    "Compatibility policy",
+    "Cutover policy",
 )
 
 
@@ -108,7 +108,7 @@ def test_image_persistence_is_outside_the_inference_core() -> None:
 
 
 def test_fal_client_is_not_a_core_required_dependency() -> None:
-    """Text-only / core install must not pull Fal. Target extras land in E2B."""
+    """Fal is an extra. openai remains required while package-root still imports TextGenerationService."""
     requires = importlib.metadata.requires("generationengine") or []
     required_names = []
     for req in requires:

@@ -1,24 +1,25 @@
 """Tests for text generation service."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from generationengine.models.requests import TextGenerationRequest, TextModel
-from generationengine.models.text_responses import TextGenerationResponse
+import pytest
+
 from generationengine.models.errors import ErrorCode
+from generationengine.models.requests import TextGenerationRequest, TextModel
 from generationengine.services.text_service import TextGenerationService
 
 
 @pytest.fixture
 def mock_openai_response():
-    """Create a mock OpenAI Responses API response."""
+    """Create a mock OpenAI Responses API response with numeric usage."""
     response = MagicMock()
     response.output_text = "Generated text content"
-    response.refusal = None  # Explicitly set to None for structured outputs check
-    response.usage = MagicMock()
-    response.usage.prompt_tokens = 10
-    response.usage.completion_tokens = 20
-    response.usage.total_tokens = 30
+    response.refusal = None
+    usage = MagicMock()
+    usage.input_tokens = 10
+    usage.output_tokens = 20
+    usage.total_tokens = 30
+    response.usage = usage
     return response
 
 
@@ -69,7 +70,7 @@ async def test_text_generation_with_system_prompt(text_service, mock_openai_resp
 
     assert response.success is True
     assert response.content == "Generated text content"
-    
+
     # Verify OpenAI was called with instructions (system prompt) and input
     call_args = text_service.openai_client.responses.create.call_args
     call_kwargs = call_args.kwargs if call_args else {}
@@ -92,13 +93,13 @@ async def test_text_generation_with_parameters(text_service, mock_openai_respons
     response = await text_service.generate(request)
 
     assert response.success is True
-    
+
     # Verify OpenAI was called with correct parameters
     call_args = text_service.openai_client.responses.create.call_args
     call_kwargs = call_args.kwargs if call_args else {}
     assert call_kwargs.get("model") == "gpt-5.1"
     assert call_kwargs.get("temperature") == 0.9
-    assert call_kwargs.get("max_tokens") == 1000
+    assert "max_tokens" not in call_kwargs
 
 
 @pytest.mark.asyncio
@@ -214,41 +215,41 @@ async def test_text_generation_stream_success(text_service):
     mock_event1 = MagicMock()
     mock_event1.type = "response.output_text.delta"
     mock_event1.delta = "Hello"
-    
+
     mock_event2 = MagicMock()
     mock_event2.type = "response.output_text.delta"
     mock_event2.delta = " world"
-    
+
     mock_event3 = MagicMock()
     mock_event3.type = "response.completed"
-    
+
     # Create async generator for events
     async def mock_stream():
         yield mock_event1
         yield mock_event2
         yield mock_event3
-    
+
     # Mock the stream manager context
     mock_stream_manager = MagicMock()
     mock_stream_manager.__aenter__ = AsyncMock(return_value=mock_stream())
     mock_stream_manager.__aexit__ = AsyncMock(return_value=None)
-    
+
     text_service.openai_client.responses.stream = MagicMock(return_value=mock_stream_manager)
-    
+
     request = TextGenerationRequest(
         user_prompt="Generate a greeting",
         model=TextModel.GPT_5_1,
     )
-    
+
     chunks = []
     async for chunk in text_service.generate_stream(request):
         chunks.append(chunk)
-    
+
     assert len(chunks) == 3  # Two content chunks + [DONE]
     assert "data: Hello\n\n" in chunks
     assert "data:  world\n\n" in chunks
     assert "data: [DONE]\n\n" in chunks
-    
+
     # Verify OpenAI was called with correct parameters
     call_args = text_service.openai_client.responses.stream.call_args
     call_kwargs = call_args.kwargs if call_args else {}
@@ -262,30 +263,30 @@ async def test_text_generation_stream_with_system_prompt(text_service):
     mock_event = MagicMock()
     mock_event.type = "response.output_text.delta"
     mock_event.delta = "Response"
-    
+
     mock_completed = MagicMock()
     mock_completed.type = "response.completed"
-    
+
     async def mock_stream():
         yield mock_event
         yield mock_completed
-    
+
     mock_stream_manager = MagicMock()
     mock_stream_manager.__aenter__ = AsyncMock(return_value=mock_stream())
     mock_stream_manager.__aexit__ = AsyncMock(return_value=None)
-    
+
     text_service.openai_client.responses.stream = MagicMock(return_value=mock_stream_manager)
-    
+
     request = TextGenerationRequest(
         system_prompt="You are a helpful assistant",
         user_prompt="Generate text",
         model=TextModel.GPT_5_1,
     )
-    
+
     chunks = []
     async for chunk in text_service.generate_stream(request):
         chunks.append(chunk)
-    
+
     # Verify OpenAI was called with instructions
     call_args = text_service.openai_client.responses.stream.call_args
     call_kwargs = call_args.kwargs if call_args else {}
@@ -300,22 +301,22 @@ async def test_text_generation_stream_error_event(text_service):
     mock_error.type = "response.error"
     mock_error.error = MagicMock()
     mock_error.error.message = "Test error"
-    
+
     async def mock_stream():
         yield mock_error
-    
+
     mock_stream_manager = MagicMock()
     mock_stream_manager.__aenter__ = AsyncMock(return_value=mock_stream())
     mock_stream_manager.__aexit__ = AsyncMock(return_value=None)
-    
+
     text_service.openai_client.responses.stream = MagicMock(return_value=mock_stream_manager)
-    
+
     request = TextGenerationRequest(user_prompt="Test")
-    
+
     chunks = []
     async for chunk in text_service.generate_stream(request):
         chunks.append(chunk)
-    
+
     assert len(chunks) == 1
     assert "[ERROR]Test error" in chunks[0]
 

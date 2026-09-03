@@ -1,10 +1,10 @@
 """Tests for Cloudflare R2 upload service."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from generationengine.services.upload_service import UploadService
-from generationengine.models.errors import ErrorCode
 
 
 @pytest.mark.asyncio

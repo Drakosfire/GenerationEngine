@@ -1,8 +1,8 @@
 # GenerationEngine core contract (target)
 
-**Status:** ACCEPTED design for E2 implementation. Not implemented by E2A.  
+**Status:** E2B landed core primitives. Live provider execution is still the pre-cutover implementation.  
 **Current behavior:** [CURRENT-STATE.md](CURRENT-STATE.md)  
-**Compatibility:** [COMPATIBILITY.md](COMPATIBILITY.md) — consumer seams until E3; unused baseline exports may change in E2
+**Cutover inventory:** [COMPATIBILITY.md](COMPATIBILITY.md)
 
 GenerationEngine is an in-process inference capability. It is not a product backend, not a network service, and not an Agent runtime.
 
@@ -83,7 +83,7 @@ After the provider reset:
 - provider SDK exception types must not be the public contract
 - advertised providers must match registered wiring and declared extras
 
-`ImageProvider` already exists as a protocol. `TextProvider` does not. E2C introduces `TextProvider` and moves `AsyncOpenAI` behind it. E2D makes advertised image providers truthful and keeps `ImageProvider` as the image seam.
+`ImageProvider` already exists as a protocol. E2B adds `TextProvider`. The coordinated cutover moves live OpenAI/Fal execution behind these seams.
 
 ---
 
@@ -343,21 +343,13 @@ Do not create separate provider packages in E2 unless the extras model proves in
 
 ---
 
-## 11. Compatibility policy
+## 11. Cutover policy
 
-E2A defines the target. It does not replace current DungeonMindServer imports.
+E2B does not replace current DungeonMindServer imports because that product is not in this PR.
 
-Preserve **demonstrated consumer imports and return shapes** until E3 migrates those callers. See [COMPATIBILITY.md](COMPATIBILITY.md).
+The next slice moves GenerationEngine and DungeonMindServer together, then deletes obsolete GE surfaces immediately. See [COMPATIBILITY.md](COMPATIBILITY.md).
 
-Historical `__all__` entries with no consumer are baseline inventory, not an E3 freeze. E2B may retire unused product-tainted surfaces such as `IGenerator`.
-
-Rule: transition before demolition applies to live seams:
-
-```text
-keep URL-returning ImageService.generate while Server still consumes .url
-keep TextGenerationService / TextGenerationRequest / TextModel while Server imports them
-do not keep generate_stream SSE or IGenerator merely because they exist on the package
-```
+Do not add deprecation frameworks, dual APIs, or SSE/URL adapters to stretch old surfaces past that cutover.
 
 ---
 

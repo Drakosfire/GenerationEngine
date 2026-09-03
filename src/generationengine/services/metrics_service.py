@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class MetricsService:
     """
     Service for aggregating and tracking generation metrics.
-    
+
     This is a minimal implementation - can be extended to:
     - Store metrics in database
     - Export to Prometheus/Datadog
