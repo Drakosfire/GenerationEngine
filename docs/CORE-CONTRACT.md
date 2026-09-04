@@ -1,6 +1,6 @@
 # GenerationEngine core contract (target)
 
-**Status:** E2B landed core primitives. Live provider execution is still the pre-cutover implementation.  
+**Status:** Coordinated cutover implemented. Live execution is `GenerationClient` over OpenAI and Fal adapters.  
 **Current behavior:** [CURRENT-STATE.md](CURRENT-STATE.md)  
 **Cutover inventory:** [COMPATIBILITY.md](COMPATIBILITY.md)
 
@@ -103,6 +103,7 @@ text_fast
 structured_low_cost
 structured_high_reliability
 image_high_quality
+image_edit_high_quality
 ```
 <!-- /ACCEPTED_PROFILES -->
 
@@ -318,9 +319,9 @@ Product backend
 Cloudflare / R2 / etc.
 ```
 
-Current `ImageService.generate()` → Cloudflare URL is pre-cutover behavior. The coordinated cutover lands artifact-free `GeneratedImage` results, moves Cloudflare persistence to DungeonMindServer, and deletes the URL-returning inference-core path in the same change.
+`GenerationClient.generate_image()` / `edit_image()` return `GeneratedImage` bytes. DungeonMindServer owns Cloudflare persistence.
 
-Image persistence helpers are not part of the inference core. `UploadService` may remain in-tree until that cutover, labeled as such, and must not be required to construct text or generation-only clients.
+Image persistence helpers are not part of the inference core. `UploadService` is deleted.
 
 ---
 
@@ -330,7 +331,7 @@ A text-only consumer must be able to construct and call text generation without 
 
 A Fal image consumer must fail with `CONFIGURATION_UNAVAILABLE` / `UNSUPPORTED_CAPABILITY` when Fal is requested without the extra or credentials.
 
-Recommended packaging (implemented in E2B):
+Recommended packaging:
 
 ```text
 core:         pydantic, httpx, tenacity
@@ -339,9 +340,9 @@ fal extra:    fal-client
 dev group:    pytest, pytest-asyncio, ruff
 ```
 
-E2B lazy-loads legacy `TextGenerationService` and `ImageService` from the package root so a core-only wheel import does not require provider extras. CI proves that boundary with an isolated built-wheel import step.
+`GenerationClient.from_env()` lazy-loads OpenAI and Fal adapters on first use so a core-only wheel import does not require provider extras. CI proves that boundary with an isolated built-wheel import step.
 
-Cloudflare is not a GenerationEngine inference dependency in the target design.
+Cloudflare is not a GenerationEngine inference dependency.
 
 Do not create separate provider packages in E2 unless the extras model proves insufficient.
 

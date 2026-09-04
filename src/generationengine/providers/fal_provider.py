@@ -11,8 +11,8 @@ except ImportError:
 
 import httpx
 
-from generationengine.models.errors import ErrorCode
-from generationengine.services.retry_service import RetryableError
+from generationengine.failures import FailureCode
+from generationengine.providers.errors import ProviderError
 
 logger = logging.getLogger(__name__)
 
@@ -295,28 +295,23 @@ class FalProvider:
             return images
 
         except (TimeoutError, httpx.TimeoutException) as e:
-            raise RetryableError(
-                ErrorCode.PROVIDER_TIMEOUT,
-                f"Fal.ai request timed out: {str(e)}",
-                original_exception=e,
-            )
+            raise ProviderError.from_code(
+                FailureCode.PROVIDER_TIMEOUT,
+                f"Fal.ai request timed out: {e}",
+            ) from e
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
-                raise RetryableError(
-                    ErrorCode.RATE_LIMITED,
-                    f"Fal.ai rate limit exceeded: {str(e)}",
-                    original_exception=e,
-                )
-            raise RetryableError(
-                ErrorCode.PROVIDER_OVERLOADED,
-                f"Fal.ai returned error {e.response.status_code}: {str(e)}",
-                original_exception=e,
-            )
+                raise ProviderError.from_code(
+                    FailureCode.RATE_LIMITED,
+                    f"Fal.ai rate limit exceeded: {e}",
+                ) from e
+            raise ProviderError.from_code(
+                FailureCode.PROVIDER_UNAVAILABLE,
+                f"Fal.ai returned error {e.response.status_code}: {e}",
+            ) from e
         except Exception as e:
-            # Wrap unexpected errors as internal errors
-            raise RetryableError(
-                ErrorCode.INTERNAL_ERROR,
-                f"Fal.ai generation failed: {str(e)}",
-                original_exception=e,
-            )
+            raise ProviderError.from_code(
+                FailureCode.PROVIDER_ERROR,
+                f"Fal.ai generation failed: {e}",
+            ) from e
 

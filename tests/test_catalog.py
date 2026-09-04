@@ -30,6 +30,7 @@ def test_accepted_profiles_exist_and_are_requirement_shaped() -> None:
         "structured_low_cost",
         "structured_high_reliability",
         "image_high_quality",
+        "image_edit_high_quality",
     }
     for profile in InferenceProfile:
         assert not profile_contains_product_vocabulary(profile.value)
