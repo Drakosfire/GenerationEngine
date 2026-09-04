@@ -49,7 +49,7 @@ class OpenAITextProvider:
                 FailureCode.CONFIGURATION_UNAVAILABLE,
                 "OPENAI_API_KEY is required for text generation.",
             )
-        self._client = AsyncOpenAI(api_key=key)
+        self._client = AsyncOpenAI(api_key=key, max_retries=0)
 
     async def generate(self, call: TextGenerationCall) -> TextGenerationResult:
         kwargs = self._request_kwargs(call)
@@ -139,11 +139,13 @@ class OpenAITextProvider:
         return kwargs
 
     def _result_from_response(self, response: Any, *, structured: bool) -> TextGenerationResult:
+        request_id, response_id = _ids_from_response(response)
         if getattr(response, "refusal", None):
             raise ProviderError.from_code(
                 FailureCode.PROVIDER_REFUSED,
                 f"Generation refused: {response.refusal}",
-                provider_request_id=getattr(response, "id", None),
+                provider_request_id=request_id,
+                provider_response_id=response_id,
                 response_model=getattr(response, "model", None),
             )
         text = getattr(response, "output_text", None)
@@ -156,7 +158,8 @@ class OpenAITextProvider:
                 raise ProviderError.from_code(
                     FailureCode.STRUCTURED_OUTPUT_INVALID,
                     f"Structured output was not valid JSON: {exc}",
-                    provider_request_id=getattr(response, "id", None),
+                    provider_request_id=request_id,
+                    provider_response_id=response_id,
                     response_model=getattr(response, "model", None),
                 ) from exc
         cached = None
@@ -167,7 +170,8 @@ class OpenAITextProvider:
         return TextGenerationResult(
             text=text,
             parsed=parsed,
-            provider_request_id=getattr(response, "id", None),
+            provider_request_id=request_id,
+            provider_response_id=response_id,
             response_model=getattr(response, "model", None),
             input_tokens=getattr(usage, "input_tokens", None) if usage else None,
             cached_input_tokens=cached,
@@ -179,18 +183,20 @@ class OpenAITextProvider:
             return exc
         name = type(exc).__name__
         message = str(exc) or name
+        request_id = _request_id_from_exception(exc)
+        kwargs = {"provider_request_id": request_id}
         if isinstance(exc, RateLimitError) or "RateLimit" in name:
-            return ProviderError.from_code(FailureCode.RATE_LIMITED, message)
+            return ProviderError.from_code(FailureCode.RATE_LIMITED, message, **kwargs)
         if isinstance(exc, APITimeoutError) or "Timeout" in name:
-            return ProviderError.from_code(FailureCode.PROVIDER_TIMEOUT, message)
+            return ProviderError.from_code(FailureCode.PROVIDER_TIMEOUT, message, **kwargs)
         status = getattr(exc, "status_code", None)
         if status == 429:
-            return ProviderError.from_code(FailureCode.RATE_LIMITED, message)
+            return ProviderError.from_code(FailureCode.RATE_LIMITED, message, **kwargs)
         if isinstance(status, int) and status >= 500:
-            return ProviderError.from_code(FailureCode.PROVIDER_UNAVAILABLE, message)
+            return ProviderError.from_code(FailureCode.PROVIDER_UNAVAILABLE, message, **kwargs)
         if isinstance(exc, APIError):
-            return ProviderError.from_code(FailureCode.PROVIDER_ERROR, message)
-        return ProviderError.from_code(FailureCode.PROVIDER_ERROR, message)
+            return ProviderError.from_code(FailureCode.PROVIDER_ERROR, message, **kwargs)
+        return ProviderError.from_code(FailureCode.PROVIDER_ERROR, message, **kwargs)
 
 
 def _empty_failed_observation(code: FailureCode) -> InferenceObservation:
@@ -210,6 +216,7 @@ def _completed_observation(result: TextGenerationResult) -> InferenceObservation
         provider="openai",
         response_model=result.response_model,
         provider_request_id=result.provider_request_id,
+        provider_response_id=result.provider_response_id,
         input_tokens=result.input_tokens,
         cached_input_tokens=result.cached_input_tokens,
         output_tokens=result.output_tokens,
@@ -217,3 +224,11 @@ def _completed_observation(result: TextGenerationResult) -> InferenceObservation
         retry_count=0,
         state=ObservationState.COMPLETED,
     )
+
+
+def _ids_from_response(response: Any) -> tuple[str | None, str | None]:
+    return getattr(response, "_request_id", None), getattr(response, "id", None)
+
+
+def _request_id_from_exception(exc: Exception) -> str | None:
+    return getattr(exc, "request_id", None) or getattr(exc, "_request_id", None)

@@ -236,3 +236,123 @@ async def test_missing_profile_or_model() -> None:
     with pytest.raises(GenerationEngineError) as exc:
         await client.generate_text(TextRequest(user_prompt="hi"))
     assert exc.value.failure.code is FailureCode.INVALID_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_deadline_is_overall_budget_not_per_attempt(monkeypatch) -> None:
+    sleeps: list[float] = []
+
+    async def _no_sleep(_delay: float) -> None:
+        sleeps.append(_delay)
+
+    monkeypatch.setattr("generationengine.client.asyncio.sleep", _no_sleep)
+    provider = FakeTextProvider(
+        errors=[
+            ProviderError.from_code(FailureCode.RATE_LIMITED, "slow"),
+            ProviderError.from_code(FailureCode.RATE_LIMITED, "slow"),
+            ProviderError.from_code(FailureCode.RATE_LIMITED, "slow"),
+        ]
+    )
+    client = GenerationClient(text_provider=provider)
+    with pytest.raises(GenerationEngineError) as exc:
+        await client.generate_text(
+            TextRequest(user_prompt="hi", profile=InferenceProfile.TEXT_FAST, deadline_ms=80)
+        )
+    assert exc.value.failure.code is FailureCode.RATE_LIMITED
+    assert provider.calls == 1
+    assert exc.value.observation.retry_count == 0
+    assert sleeps == []
+
+
+@pytest.mark.asyncio
+async def test_retries_use_backoff_when_budget_allows(monkeypatch) -> None:
+    sleeps: list[float] = []
+
+    async def _record_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr("generationengine.client.asyncio.sleep", _record_sleep)
+    provider = FakeTextProvider(
+        errors=[
+            ProviderError.from_code(FailureCode.RATE_LIMITED, "slow"),
+            ProviderError.from_code(FailureCode.RATE_LIMITED, "slow"),
+        ],
+        results=[TextGenerationResult(text="recovered")],
+    )
+    client = GenerationClient(text_provider=provider)
+    result = await client.generate_text(
+        TextRequest(user_prompt="hi", profile=InferenceProfile.TEXT_FAST, deadline_ms=10_000)
+    )
+    assert result.text == "recovered"
+    assert result.observation.retry_count == 2
+    assert provider.calls == 3
+    assert sleeps == [0.5, 1.0]
+
+
+@pytest.mark.asyncio
+async def test_image_wait_for_timeout_is_provider_timeout() -> None:
+    import asyncio
+
+    class SlowImage:
+        async def generate(self, **kwargs) -> list[bytes]:
+            await asyncio.sleep(1)
+            return [b"late"]
+
+    client = GenerationClient(image_provider=SlowImage())
+    from generationengine.types import ImageRequest
+
+    with pytest.raises(GenerationEngineError) as exc:
+        await client.generate_image(
+            ImageRequest(prompt="a map", model="gpt-image-1.5", deadline_ms=50)
+        )
+    assert exc.value.failure.code is FailureCode.PROVIDER_TIMEOUT
+    assert exc.value.observation.state is ObservationState.FAILED
+
+
+@pytest.mark.asyncio
+async def test_stream_observation_is_client_owned() -> None:
+    import asyncio
+
+    class SlowStream(FakeTextProvider):
+        async def stream(self, call: TextGenerationCall) -> AsyncIterator[TextStreamEvent]:
+            await asyncio.sleep(0.02)
+            yield TextCompleted(
+                final_text="hello",
+                observation=InferenceObservation(
+                    provider="openai",
+                    provider_request_id="http-req",
+                    provider_response_id="resp_abc",
+                    latency_ms=0,
+                    retry_count=0,
+                    state=ObservationState.COMPLETED,
+                ),
+            )
+            yield TextCompleted(
+                final_text="second-terminal",
+                observation=InferenceObservation(
+                    provider="openai",
+                    latency_ms=0,
+                    retry_count=0,
+                    state=ObservationState.COMPLETED,
+                ),
+            )
+
+    client = GenerationClient(text_provider=SlowStream())
+    events = [
+        event
+        async for event in client.stream_text(
+            TextRequest(user_prompt="hi", profile=InferenceProfile.TEXT_FAST)
+        )
+    ]
+    terminals = [event for event in events if isinstance(event, (TextCompleted, TextFailed))]
+    assert len(terminals) == 1
+    completed = terminals[0]
+    assert isinstance(completed, TextCompleted)
+    assert completed.final_text == "hello"
+    assert completed.observation.requested_profile == "text_fast"
+    assert completed.observation.resolved_model == "gpt-5.1"
+    assert completed.observation.provider == "openai"
+    assert completed.observation.provider_request_id == "http-req"
+    assert completed.observation.provider_response_id == "resp_abc"
+    assert completed.observation.latency_ms >= 20
+    assert completed.observation.retry_count == 0

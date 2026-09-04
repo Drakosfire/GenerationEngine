@@ -28,7 +28,11 @@ class TextRequest(BaseModel):
     temperature: float = 0.7
     json_schema: dict[str, Any] | None = None
     schema_name: str | None = None
-    deadline_ms: int | None = Field(default=None, ge=1)
+    deadline_ms: int | None = Field(
+        default=None,
+        ge=1,
+        description="Overall GenerationEngine operation budget in milliseconds, including retries.",
+    )
 
 
 class TextResult(BaseModel):
@@ -50,7 +54,11 @@ class ImageRequest(BaseModel):
     mask_base64: str | None = None
     base_image_base64: str | None = None
     strength: float | None = Field(default=None, ge=0.0, le=1.0)
-    deadline_ms: int | None = Field(default=None, ge=1)
+    deadline_ms: int | None = Field(
+        default=None,
+        ge=1,
+        description="Overall GenerationEngine operation budget in milliseconds, including retries.",
+    )
 
 
 class GeneratedImage(BaseModel):

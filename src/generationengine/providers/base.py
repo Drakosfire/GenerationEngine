@@ -49,6 +49,7 @@ class TextGenerationResult(BaseModel):
     parsed: dict[str, Any] | None = None
     refused: bool = False
     provider_request_id: str | None = None
+    provider_response_id: str | None = None
     response_model: str | None = None
     input_tokens: int | None = Field(default=None, ge=0)
     cached_input_tokens: int | None = Field(default=None, ge=0)

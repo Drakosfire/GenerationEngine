@@ -80,6 +80,7 @@ def test_inference_observation_fields_are_specified() -> None:
         "resolved_model",
         "response_model",
         "provider_request_id",
+        "provider_response_id",
         "input_tokens",
         "cached_input_tokens",
         "output_tokens",

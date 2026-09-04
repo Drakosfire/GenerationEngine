@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import TypeVar
 
 from generationengine.catalog import Capability
 from generationengine.failures import FailureCode, InferenceFailure
@@ -28,7 +30,10 @@ from generationengine.types import (
 )
 
 MAX_ATTEMPTS = 3
-DEFAULT_ATTEMPT_TIMEOUT_S = 60.0
+DEFAULT_DEADLINE_S = 60.0
+BACKOFF_SECONDS = (0.5, 1.0)
+
+T = TypeVar("T")
 
 
 class GenerationClient:
@@ -111,7 +116,16 @@ class GenerationClient:
         terminal = False
         async for event in provider.stream(call):
             if isinstance(event, (TextCompleted, TextFailed)):
+                if terminal:
+                    continue
                 terminal = True
+                yield _public_stream_terminal(
+                    event,
+                    request=request,
+                    resolution=resolution,
+                    latency_ms=_elapsed_ms(started),
+                )
+                return
             yield event
         if not terminal:
             failure = InferenceFailure.from_code(
@@ -149,6 +163,7 @@ class GenerationClient:
         capability: Capability,
     ) -> TextResult:
         started = time.monotonic()
+        deadline_s = _deadline_s(request.deadline_ms)
         try:
             resolution = resolve(
                 capability=capability,
@@ -159,78 +174,46 @@ class GenerationClient:
             raise _config_error(exc.failure, request=request) from exc
         provider = self._text_provider()
         call = _text_call(request, resolution.record.provider_model_id)
-        retry_count = 0
-        last_error: ProviderError | None = None
-        timeout_s = _timeout_s(request.deadline_ms)
-        for attempt in range(MAX_ATTEMPTS):
-            try:
-                result = await _with_timeout(provider.generate(call), timeout_s)
-                observation = _completed_observation(
+        try:
+            result, retry_count = await _execute_with_retries(
+                started=started,
+                deadline_s=deadline_s,
+                attempt=lambda: provider.generate(call),
+            )
+        except ProviderError as exc:
+            raise GenerationEngineError(
+                exc.failure,
+                _failed_observation(
+                    failure=exc.failure,
                     request=request,
                     resolution=resolution,
-                    result=result,
                     latency_ms=_elapsed_ms(started),
-                    retry_count=retry_count,
-                )
-                if result.refused:
-                    failure = InferenceFailure.from_code(
-                        FailureCode.PROVIDER_REFUSED,
-                        "Provider refused the request.",
-                    )
-                    raise GenerationEngineError(
-                        failure,
-                        observation.model_copy(
-                            update={
-                                "state": ObservationState.REFUSED,
-                                "failure_code": FailureCode.PROVIDER_REFUSED,
-                            }
-                        ),
-                    )
-                return TextResult(text=result.text, parsed=result.parsed, observation=observation)
-            except ProviderError as exc:
-                last_error = exc
-                if not exc.retryable or attempt == MAX_ATTEMPTS - 1:
-                    retry_count = attempt
-                    raise GenerationEngineError(
-                        exc.failure,
-                        _failed_observation(
-                            failure=exc.failure,
-                            request=request,
-                            resolution=resolution,
-                            latency_ms=_elapsed_ms(started),
-                            retry_count=retry_count,
-                            result=exc,
-                        ),
-                    ) from exc
-                retry_count = attempt + 1
-            except TimeoutError as exc:
-                last_error = ProviderError.from_code(
-                    FailureCode.PROVIDER_TIMEOUT,
-                    f"Request timed out after {timeout_s}s",
-                )
-                if attempt == MAX_ATTEMPTS - 1:
-                    raise GenerationEngineError(
-                        last_error.failure,
-                        _failed_observation(
-                            failure=last_error.failure,
-                            request=request,
-                            resolution=resolution,
-                            latency_ms=_elapsed_ms(started),
-                            retry_count=attempt,
-                        ),
-                    ) from exc
-                retry_count = attempt + 1
-        assert last_error is not None
-        raise GenerationEngineError(
-            last_error.failure,
-            _failed_observation(
-                failure=last_error.failure,
-                request=request,
-                resolution=resolution,
-                latency_ms=_elapsed_ms(started),
-                retry_count=retry_count,
-            ),
+                    retry_count=_retry_count_from_error(exc),
+                    result=exc,
+                ),
+            ) from exc
+        observation = _completed_observation(
+            request=request,
+            resolution=resolution,
+            result=result,
+            latency_ms=_elapsed_ms(started),
+            retry_count=retry_count,
         )
+        if result.refused:
+            failure = InferenceFailure.from_code(
+                FailureCode.PROVIDER_REFUSED,
+                "Provider refused the request.",
+            )
+            raise GenerationEngineError(
+                failure,
+                observation.model_copy(
+                    update={
+                        "state": ObservationState.REFUSED,
+                        "failure_code": FailureCode.PROVIDER_REFUSED,
+                    }
+                ),
+            )
+        return TextResult(text=result.text, parsed=result.parsed, observation=observation)
 
     async def _generate_image(
         self,
@@ -239,6 +222,7 @@ class GenerationClient:
         capability: Capability,
     ) -> ImageResult:
         started = time.monotonic()
+        deadline_s = _deadline_s(request.deadline_ms)
         try:
             resolution = resolve(
                 capability=capability,
@@ -248,84 +232,64 @@ class GenerationClient:
         except ResolutionError as exc:
             raise _config_error(exc.failure, image=request) from exc
         provider = self._image_provider()
-        retry_count = 0
-        timeout_s = _timeout_s(request.deadline_ms)
-        last_error: ProviderError | None = None
-        for attempt in range(MAX_ATTEMPTS):
+
+        async def _once() -> list[bytes]:
             try:
-                blobs = await _with_timeout(
-                    provider.generate(
-                        prompt=request.prompt,
-                        model=resolution.record.provider_model_id,
-                        num_images=request.num_images,
-                        size=(request.width, request.height),
-                        image_url=request.source_image_url,
-                        strength=request.strength if request.strength is not None else 0.85,
-                        mask_base64=request.mask_base64,
-                        base_image_base64=request.base_image_base64,
-                        negative_prompt=request.negative_prompt,
-                    ),
-                    timeout_s,
+                return await provider.generate(
+                    prompt=request.prompt,
+                    model=resolution.record.provider_model_id,
+                    num_images=request.num_images,
+                    size=(request.width, request.height),
+                    image_url=request.source_image_url,
+                    strength=request.strength if request.strength is not None else 0.85,
+                    mask_base64=request.mask_base64,
+                    base_image_base64=request.base_image_base64,
+                    negative_prompt=request.negative_prompt,
                 )
-                observation = InferenceObservation(
-                    provider=resolution.record.provider,
-                    requested_profile=request.profile.value if request.profile else None,
-                    requested_model=request.model,
-                    resolved_model=resolution.catalog_id,
-                    latency_ms=_elapsed_ms(started),
-                    retry_count=retry_count,
-                    state=ObservationState.COMPLETED,
-                )
-                images = [
-                    GeneratedImage(
-                        content=blob,
-                        media_type="image/png",
-                        width=request.width,
-                        height=request.height,
-                    )
-                    for blob in blobs
-                ]
-                return ImageResult(images=images, observation=observation)
-            except ProviderError as exc:
-                last_error = exc
-                if not exc.retryable or attempt == MAX_ATTEMPTS - 1:
-                    raise GenerationEngineError(
-                        exc.failure,
-                        _failed_observation(
-                            failure=exc.failure,
-                            image=request,
-                            resolution=resolution,
-                            latency_ms=_elapsed_ms(started),
-                            retry_count=attempt,
-                        ),
-                    ) from exc
-                retry_count = attempt + 1
+            except ProviderError:
+                raise
+            except TimeoutError:
+                raise
             except Exception as exc:
-                mapped = _map_image_exception(exc)
-                last_error = mapped
-                if not mapped.retryable or attempt == MAX_ATTEMPTS - 1:
-                    raise GenerationEngineError(
-                        mapped.failure,
-                        _failed_observation(
-                            failure=mapped.failure,
-                            image=request,
-                            resolution=resolution,
-                            latency_ms=_elapsed_ms(started),
-                            retry_count=attempt,
-                        ),
-                    ) from exc
-                retry_count = attempt + 1
-        assert last_error is not None
-        raise GenerationEngineError(
-            last_error.failure,
-            _failed_observation(
-                failure=last_error.failure,
-                image=request,
-                resolution=resolution,
-                latency_ms=_elapsed_ms(started),
-                retry_count=retry_count,
-            ),
+                raise _map_image_exception(exc) from exc
+
+        try:
+            blobs, retry_count = await _execute_with_retries(
+                started=started,
+                deadline_s=deadline_s,
+                attempt=_once,
+            )
+        except ProviderError as exc:
+            raise GenerationEngineError(
+                exc.failure,
+                _failed_observation(
+                    failure=exc.failure,
+                    image=request,
+                    resolution=resolution,
+                    latency_ms=_elapsed_ms(started),
+                    retry_count=_retry_count_from_error(exc),
+                    result=exc,
+                ),
+            ) from exc
+        observation = InferenceObservation(
+            provider=resolution.record.provider,
+            requested_profile=request.profile.value if request.profile else None,
+            requested_model=request.model,
+            resolved_model=resolution.catalog_id,
+            latency_ms=_elapsed_ms(started),
+            retry_count=retry_count,
+            state=ObservationState.COMPLETED,
         )
+        images = [
+            GeneratedImage(
+                content=blob,
+                media_type="image/png",
+                width=request.width,
+                height=request.height,
+            )
+            for blob in blobs
+        ]
+        return ImageResult(images=images, observation=observation)
 
 
 def _text_call(request: TextRequest, model: str) -> TextGenerationCall:
@@ -339,16 +303,70 @@ def _text_call(request: TextRequest, model: str) -> TextGenerationCall:
     )
 
 
-async def _with_timeout(awaitable, timeout_s: float):
-    import asyncio
+async def _execute_with_retries(
+    *,
+    started: float,
+    deadline_s: float,
+    attempt: Callable[[], Awaitable[T]],
+) -> tuple[T, int]:
+    """Run one provider operation under a single overall deadline.
 
+    `deadline_s` bounds the whole GenerationEngine call, including backoff.
+    Each attempt is limited to remaining budget. Provider SDK retries are not
+    this loop; adapters must disable them.
+    """
+    last_error: ProviderError | None = None
+    retry_count = 0
+    for attempt_index in range(MAX_ATTEMPTS):
+        remaining = _remaining_s(started, deadline_s)
+        if remaining <= 0:
+            last_error = _timeout_error(deadline_s, retry_count=retry_count)
+            break
+        try:
+            result = await _with_timeout(attempt(), remaining)
+            return result, retry_count
+        except ProviderError as exc:
+            last_error = exc
+            last_error.retry_count = retry_count
+        except TimeoutError:
+            last_error = _timeout_error(deadline_s, retry_count=retry_count)
+        if not last_error.retryable or attempt_index == MAX_ATTEMPTS - 1:
+            raise last_error
+        delay = BACKOFF_SECONDS[min(attempt_index, len(BACKOFF_SECONDS) - 1)]
+        remaining_after = _remaining_s(started, deadline_s)
+        if remaining_after <= delay:
+            raise last_error
+        await asyncio.sleep(delay)
+        retry_count = attempt_index + 1
+    assert last_error is not None
+    raise last_error
+
+
+async def _with_timeout(awaitable: Awaitable[T], timeout_s: float) -> T:
     return await asyncio.wait_for(awaitable, timeout=timeout_s)
 
 
-def _timeout_s(deadline_ms: int | None) -> float:
+def _deadline_s(deadline_ms: int | None) -> float:
     if deadline_ms is None:
-        return DEFAULT_ATTEMPT_TIMEOUT_S
+        return DEFAULT_DEADLINE_S
     return max(deadline_ms / 1000.0, 0.001)
+
+
+def _remaining_s(started: float, deadline_s: float) -> float:
+    return deadline_s - (time.monotonic() - started)
+
+
+def _timeout_error(deadline_s: float, *, retry_count: int) -> ProviderError:
+    error = ProviderError.from_code(
+        FailureCode.PROVIDER_TIMEOUT,
+        f"Operation timed out after {deadline_s:g}s",
+    )
+    error.retry_count = retry_count
+    return error
+
+
+def _retry_count_from_error(exc: ProviderError) -> int:
+    return getattr(exc, "retry_count", 0)
 
 
 def _elapsed_ms(started: float) -> int:
@@ -375,6 +393,68 @@ def _config_error(
     )
 
 
+def _public_stream_terminal(
+    event: TextCompleted | TextFailed,
+    *,
+    request: TextRequest,
+    resolution,
+    latency_ms: int,
+) -> TextCompleted | TextFailed:
+    provider_obs = event.observation
+    if isinstance(event, TextCompleted):
+        return TextCompleted(
+            final_text=event.final_text,
+            observation=_completed_observation_from_stream(
+                request=request,
+                resolution=resolution,
+                provider_obs=provider_obs,
+                latency_ms=latency_ms,
+            ),
+        )
+    return TextFailed(
+        failure=event.failure,
+        observation=_failed_observation(
+            failure=event.failure,
+            request=request,
+            resolution=resolution,
+            latency_ms=latency_ms,
+            retry_count=0,
+            provider_request_id=provider_obs.provider_request_id,
+            provider_response_id=provider_obs.provider_response_id,
+            response_model=provider_obs.response_model,
+            input_tokens=provider_obs.input_tokens,
+            cached_input_tokens=provider_obs.cached_input_tokens,
+            output_tokens=provider_obs.output_tokens,
+        ),
+    )
+
+
+def _completed_observation_from_stream(
+    *,
+    request: TextRequest,
+    resolution,
+    provider_obs: InferenceObservation,
+    latency_ms: int,
+) -> InferenceObservation:
+    return InferenceObservation(
+        provider=resolution.record.provider,
+        requested_profile=request.profile.value if request.profile else None,
+        requested_model=request.model,
+        resolved_model=resolution.catalog_id,
+        response_model=provider_obs.response_model,
+        provider_request_id=provider_obs.provider_request_id,
+        provider_response_id=provider_obs.provider_response_id,
+        input_tokens=provider_obs.input_tokens,
+        cached_input_tokens=provider_obs.cached_input_tokens,
+        output_tokens=provider_obs.output_tokens,
+        cost_usd=None,
+        latency_ms=latency_ms,
+        retry_count=0,
+        state=ObservationState.COMPLETED,
+        pricing_source=resolution.record.pricing_source,
+    )
+
+
 def _completed_observation(
     *,
     request: TextRequest,
@@ -390,6 +470,7 @@ def _completed_observation(
         resolved_model=resolution.catalog_id,
         response_model=result.response_model,
         provider_request_id=result.provider_request_id,
+        provider_response_id=getattr(result, "provider_response_id", None),
         input_tokens=result.input_tokens,
         cached_input_tokens=result.cached_input_tokens,
         output_tokens=result.output_tokens,
@@ -411,6 +492,12 @@ def _failed_observation(
     retry_count: int,
     result: ProviderError | None = None,
     provider: str | None = None,
+    provider_request_id: str | None = None,
+    provider_response_id: str | None = None,
+    response_model: str | None = None,
+    input_tokens: int | None = None,
+    cached_input_tokens: int | None = None,
+    output_tokens: int | None = None,
 ) -> InferenceObservation:
     profile = None
     model = None
@@ -434,11 +521,16 @@ def _failed_observation(
         requested_profile=profile,
         requested_model=model,
         resolved_model=resolution.catalog_id if resolution else None,
-        response_model=result.response_model if result else None,
-        provider_request_id=result.provider_request_id if result else None,
-        input_tokens=result.input_tokens if result else None,
-        cached_input_tokens=result.cached_input_tokens if result else None,
-        output_tokens=result.output_tokens if result else None,
+        response_model=response_model or (result.response_model if result else None),
+        provider_request_id=provider_request_id
+        or (result.provider_request_id if result else None),
+        provider_response_id=provider_response_id
+        or (getattr(result, "provider_response_id", None) if result else None),
+        input_tokens=input_tokens if input_tokens is not None else (result.input_tokens if result else None),
+        cached_input_tokens=cached_input_tokens
+        if cached_input_tokens is not None
+        else (result.cached_input_tokens if result else None),
+        output_tokens=output_tokens if output_tokens is not None else (result.output_tokens if result else None),
         latency_ms=latency_ms,
         retry_count=retry_count,
         state=state,
@@ -450,4 +542,6 @@ def _failed_observation(
 def _map_image_exception(exc: Exception) -> ProviderError:
     if isinstance(exc, ProviderError):
         return exc
+    if isinstance(exc, TimeoutError):
+        return ProviderError.from_code(FailureCode.PROVIDER_TIMEOUT, str(exc) or "timed out")
     return ProviderError.from_code(FailureCode.PROVIDER_ERROR, str(exc) or type(exc).__name__)

@@ -166,6 +166,7 @@ InferenceObservation
   resolved_model        str | None
   response_model        str | None
   provider_request_id   str | None
+  provider_response_id  str | None
   input_tokens          int | None
   cached_input_tokens   int | None
   output_tokens         int | None
@@ -239,7 +240,7 @@ Public failures are GenerationEngine types, not OpenAI/Fal/httpx exceptions.
 | `INVALID_REQUEST` | caller-owned request failed GE validation | no | field/reason | no |
 | `PROVIDER_REFUSED` | provider content-policy / refusal | no | sanitized provider message | no, unless provider also returned usable content (then `state=refused` with content + observation) |
 | `RATE_LIMITED` | provider 429 / quota | yes | retry-after if present | no |
-| `PROVIDER_TIMEOUT` | attempt deadline exceeded | yes | timeout budget | no |
+| `PROVIDER_TIMEOUT` | overall inference budget exceeded | yes | timeout budget | no |
 | `PROVIDER_UNAVAILABLE` | 5xx, overload, transport outage | yes | status if present | no |
 | `PROVIDER_ERROR` | other provider/transport error | unknown | sanitized message | no |
 | `MALFORMED_PROVIDER_RESPONSE` | unusable payload from provider | no | reason | no |

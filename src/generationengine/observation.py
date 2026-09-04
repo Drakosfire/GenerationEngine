@@ -42,6 +42,7 @@ class InferenceObservation(BaseModel):
     resolved_model: str | None = None
     response_model: str | None = None
     provider_request_id: str | None = None
+    provider_response_id: str | None = None
     input_tokens: int | None = Field(default=None, ge=0)
     cached_input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
