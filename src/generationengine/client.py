@@ -93,7 +93,10 @@ class GenerationClient:
         return await self._generate_text(request, capability=Capability.STRUCTURED_TEXT)
 
     async def stream_text(self, request: TextRequest) -> AsyncIterator[TextStreamEvent]:
+        """Yield deltas, then exactly one terminal. Streaming does not retry."""
         started = time.monotonic()
+        deadline_s = _deadline_s(request.deadline_ms)
+        resolution = None
         try:
             resolution = resolve(
                 capability=Capability.STREAMING_TEXT,
@@ -101,47 +104,100 @@ class GenerationClient:
                 model=request.model,
             )
         except ResolutionError as exc:
-            yield TextFailed(
+            yield _stream_failure(
                 failure=exc.failure,
-                observation=_failed_observation(
-                    failure=exc.failure,
-                    request=request,
-                    latency_ms=_elapsed_ms(started),
-                    retry_count=0,
-                ),
+                request=request,
+                started=started,
             )
             return
-        provider = self._text_provider()
-        call = _text_call(request, resolution.record.provider_model_id)
+
+        stream = None
         terminal = False
-        async for event in provider.stream(call):
-            if isinstance(event, (TextCompleted, TextFailed)):
-                if terminal:
-                    continue
-                terminal = True
-                yield _public_stream_terminal(
-                    event,
+        try:
+            try:
+                provider = self._text_provider()
+            except GenerationEngineError as exc:
+                yield _stream_failure(
+                    failure=exc.failure,
                     request=request,
                     resolution=resolution,
-                    latency_ms=_elapsed_ms(started),
+                    started=started,
+                    provider=exc.observation.provider,
                 )
                 return
-            yield event
-        if not terminal:
-            failure = InferenceFailure.from_code(
-                FailureCode.STREAM_INCOMPLETE,
-                "Text stream ended without TextCompleted or TextFailed.",
-            )
-            yield TextFailed(
-                failure=failure,
-                observation=_failed_observation(
-                    failure=failure,
+            call = _text_call(request, resolution.record.provider_model_id)
+            stream = provider.stream(call)
+            iterator = stream.__aiter__()
+            while True:
+                remaining = _remaining_s(started, deadline_s)
+                if remaining <= 0:
+                    raise TimeoutError()
+                event = await _with_timeout(_anext_or_none(iterator), remaining)
+                if event is None:
+                    break
+                if isinstance(event, (TextCompleted, TextFailed)):
+                    if terminal:
+                        continue
+                    terminal = True
+                    yield _public_stream_terminal(
+                        event,
+                        request=request,
+                        resolution=resolution,
+                        latency_ms=_elapsed_ms(started),
+                    )
+                    return
+                yield event
+            if not terminal:
+                yield _stream_failure(
+                    failure=InferenceFailure.from_code(
+                        FailureCode.STREAM_INCOMPLETE,
+                        "Text stream ended without TextCompleted or TextFailed.",
+                    ),
                     request=request,
                     resolution=resolution,
-                    latency_ms=_elapsed_ms(started),
-                    retry_count=0,
-                ),
-            )
+                    started=started,
+                )
+        except TimeoutError:
+            if not terminal:
+                yield _stream_failure(
+                    failure=InferenceFailure.from_code(
+                        FailureCode.PROVIDER_TIMEOUT,
+                        f"Operation timed out after {deadline_s:g}s",
+                    ),
+                    request=request,
+                    resolution=resolution,
+                    started=started,
+                )
+        except ProviderError as exc:
+            if not terminal:
+                yield _stream_failure(
+                    failure=exc.failure,
+                    request=request,
+                    resolution=resolution,
+                    started=started,
+                    result=exc,
+                )
+        except GenerationEngineError as exc:
+            if not terminal:
+                yield _stream_failure(
+                    failure=exc.failure,
+                    request=request,
+                    resolution=resolution,
+                    started=started,
+                    provider=exc.observation.provider,
+                )
+        except Exception as exc:
+            if not terminal:
+                mapped = _map_provider_exception(exc)
+                yield _stream_failure(
+                    failure=mapped.failure,
+                    request=request,
+                    resolution=resolution,
+                    started=started,
+                    result=mapped,
+                )
+        finally:
+            await _aclose_stream(stream)
 
     async def generate_image(self, request: ImageRequest) -> ImageResult:
         return await self._generate_image(request, capability=Capability.IMAGE)
@@ -251,7 +307,7 @@ class GenerationClient:
             except TimeoutError:
                 raise
             except Exception as exc:
-                raise _map_image_exception(exc) from exc
+                raise _map_provider_exception(exc) from exc
 
         try:
             blobs, retry_count = await _execute_with_retries(
@@ -346,6 +402,25 @@ async def _with_timeout(awaitable: Awaitable[T], timeout_s: float) -> T:
     return await asyncio.wait_for(awaitable, timeout=timeout_s)
 
 
+async def _anext_or_none(iterator: AsyncIterator[T]) -> T | None:
+    try:
+        return await iterator.__anext__()
+    except StopAsyncIteration:
+        return None
+
+
+async def _aclose_stream(stream: AsyncIterator[T] | None) -> None:
+    if stream is None:
+        return
+    aclose = getattr(stream, "aclose", None)
+    if not callable(aclose):
+        return
+    try:
+        await aclose()
+    except Exception:
+        return
+
+
 def _deadline_s(deadline_ms: int | None) -> float:
     if deadline_ms is None:
         return DEFAULT_DEADLINE_S
@@ -389,6 +464,29 @@ def _config_error(
             provider=provider,
             latency_ms=0,
             retry_count=0,
+        ),
+    )
+
+
+def _stream_failure(
+    *,
+    failure: InferenceFailure,
+    request: TextRequest,
+    started: float,
+    resolution=None,
+    provider: str | None = None,
+    result: ProviderError | None = None,
+) -> TextFailed:
+    return TextFailed(
+        failure=failure,
+        observation=_failed_observation(
+            failure=failure,
+            request=request,
+            resolution=resolution,
+            latency_ms=_elapsed_ms(started),
+            retry_count=0,
+            result=result,
+            provider=provider,
         ),
     )
 
@@ -539,7 +637,7 @@ def _failed_observation(
     )
 
 
-def _map_image_exception(exc: Exception) -> ProviderError:
+def _map_provider_exception(exc: Exception) -> ProviderError:
     if isinstance(exc, ProviderError):
         return exc
     if isinstance(exc, TimeoutError):

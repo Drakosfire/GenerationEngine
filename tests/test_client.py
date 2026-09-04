@@ -356,3 +356,124 @@ async def test_stream_observation_is_client_owned() -> None:
     assert completed.observation.provider_response_id == "resp_abc"
     assert completed.observation.latency_ms >= 20
     assert completed.observation.retry_count == 0
+
+
+@pytest.mark.asyncio
+async def test_stream_partial_then_deadline_is_timeout() -> None:
+    import asyncio
+
+    class PartialThenHang(FakeTextProvider):
+        async def stream(self, call: TextGenerationCall) -> AsyncIterator[TextStreamEvent]:
+            yield TextDelta(text="partial")
+            await asyncio.sleep(1)
+            yield TextCompleted(
+                final_text="too-late",
+                observation=InferenceObservation(
+                    provider="openai",
+                    latency_ms=0,
+                    retry_count=0,
+                    state=ObservationState.COMPLETED,
+                ),
+            )
+
+    client = GenerationClient(text_provider=PartialThenHang())
+    events = [
+        event
+        async for event in client.stream_text(
+            TextRequest(
+                user_prompt="hi",
+                profile=InferenceProfile.TEXT_FAST,
+                deadline_ms=50,
+            )
+        )
+    ]
+    terminals = [event for event in events if isinstance(event, (TextCompleted, TextFailed))]
+    assert [event.text for event in events if isinstance(event, TextDelta)] == ["partial"]
+    assert len(terminals) == 1
+    assert isinstance(terminals[0], TextFailed)
+    assert terminals[0].failure.code is FailureCode.PROVIDER_TIMEOUT
+    assert terminals[0].observation.retry_count == 0
+    assert terminals[0].observation.requested_profile == "text_fast"
+
+
+@pytest.mark.asyncio
+async def test_stream_config_failure_before_delta_is_terminal(monkeypatch) -> None:
+    def _boom(_self):
+        raise ProviderError.from_code(
+            FailureCode.CONFIGURATION_UNAVAILABLE,
+            "OPENAI_API_KEY is required for text generation.",
+        )
+
+    monkeypatch.setattr(
+        "generationengine.providers.openai_text.OpenAITextProvider.__init__",
+        _boom,
+    )
+    client = GenerationClient()
+    events = [
+        event
+        async for event in client.stream_text(
+            TextRequest(user_prompt="hi", profile=InferenceProfile.TEXT_FAST)
+        )
+    ]
+    assert len(events) == 1
+    assert isinstance(events[0], TextFailed)
+    assert events[0].failure.code is FailureCode.CONFIGURATION_UNAVAILABLE
+    assert events[0].observation.state is ObservationState.FAILED
+
+
+@pytest.mark.asyncio
+async def test_stream_provider_exception_during_stream_is_terminal() -> None:
+    class ExplodingStream(FakeTextProvider):
+        async def stream(self, call: TextGenerationCall) -> AsyncIterator[TextStreamEvent]:
+            yield TextDelta(text="partial")
+            raise RuntimeError("socket died")
+
+    client = GenerationClient(text_provider=ExplodingStream())
+    events = [
+        event
+        async for event in client.stream_text(
+            TextRequest(user_prompt="hi", profile=InferenceProfile.TEXT_FAST)
+        )
+    ]
+    terminals = [event for event in events if isinstance(event, (TextCompleted, TextFailed))]
+    assert [event.text for event in events if isinstance(event, TextDelta)] == ["partial"]
+    assert len(terminals) == 1
+    assert isinstance(terminals[0], TextFailed)
+    assert terminals[0].failure.code is FailureCode.PROVIDER_ERROR
+    assert "socket died" in terminals[0].failure.message
+
+
+@pytest.mark.asyncio
+async def test_stream_duplicate_provider_terminal_emits_one() -> None:
+    failed = TextFailed(
+        failure=ProviderError.from_code(FailureCode.PROVIDER_ERROR, "first").failure,
+        observation=InferenceObservation(
+            provider="openai",
+            latency_ms=0,
+            retry_count=0,
+            state=ObservationState.FAILED,
+            failure_code=FailureCode.PROVIDER_ERROR,
+        ),
+    )
+    duplicate = TextFailed(
+        failure=ProviderError.from_code(FailureCode.PROVIDER_ERROR, "second").failure,
+        observation=InferenceObservation(
+            provider="openai",
+            latency_ms=0,
+            retry_count=0,
+            state=ObservationState.FAILED,
+            failure_code=FailureCode.PROVIDER_ERROR,
+        ),
+    )
+    provider = FakeTextProvider(stream_events=[TextDelta(text="partial"), failed, duplicate])
+    client = GenerationClient(text_provider=provider)
+    events = [
+        event
+        async for event in client.stream_text(
+            TextRequest(user_prompt="hi", profile=InferenceProfile.TEXT_FAST)
+        )
+    ]
+    terminals = [event for event in events if isinstance(event, (TextCompleted, TextFailed))]
+    assert len(terminals) == 1
+    assert isinstance(terminals[0], TextFailed)
+    assert terminals[0].failure.message == "first"

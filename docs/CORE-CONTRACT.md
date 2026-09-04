@@ -274,7 +274,23 @@ TextCompleted(final_text, observation)
 TextFailed(failure, observation)
 ```
 
-Every stream must end with exactly one terminal event: `TextCompleted` or `TextFailed`. Partial deltas remain valid when a stream ends in `TextFailed` with `STREAM_INCOMPLETE`.
+Every stream must end with exactly one terminal event: `TextCompleted` or `TextFailed`. Partial deltas remain valid when a stream ends in `TextFailed`.
+
+`stream_text()` consumes the same overall `deadline_ms` budget as non-streaming calls. It does **not** retry after output has begun. Construction/config failures, provider exceptions, overall-budget timeouts, and duplicate provider terminals are all normalized to that single public terminal:
+
+```text
+partial stream + deadline
+  → exactly one TextFailed(PROVIDER_TIMEOUT)
+
+provider/config failure before first delta
+  → exactly one TextFailed
+
+provider exception during stream
+  → exactly one TextFailed
+
+duplicate provider terminal
+  → only one public terminal
+```
 
 Product backends translate those events into SSE, WebSocket, CLI, or other transports.
 
