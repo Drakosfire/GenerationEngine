@@ -32,5 +32,5 @@ class ProviderError(Exception):
         return self.failure.retryability is Retryability.YES
 
     @classmethod
-    def from_code(cls, code: FailureCode, message: str, **kwargs: object) -> ProviderError:
+    def from_code(cls, code: FailureCode, message: str | None = None, **kwargs: object) -> ProviderError:
         return cls(InferenceFailure.from_code(code, message), **kwargs)  # type: ignore[arg-type]

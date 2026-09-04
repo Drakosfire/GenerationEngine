@@ -306,6 +306,7 @@ async def test_image_wait_for_timeout_is_provider_timeout() -> None:
             ImageRequest(prompt="a map", model="gpt-image-1.5", deadline_ms=50)
         )
     assert exc.value.failure.code is FailureCode.PROVIDER_TIMEOUT
+    assert exc.value.failure.message == "Provider request timed out."
     assert exc.value.observation.state is ObservationState.FAILED
 
 
@@ -392,6 +393,7 @@ async def test_stream_partial_then_deadline_is_timeout() -> None:
     assert len(terminals) == 1
     assert isinstance(terminals[0], TextFailed)
     assert terminals[0].failure.code is FailureCode.PROVIDER_TIMEOUT
+    assert terminals[0].failure.message == "Provider request timed out."
     assert terminals[0].observation.retry_count == 0
     assert terminals[0].observation.requested_profile == "text_fast"
 
@@ -440,7 +442,8 @@ async def test_stream_provider_exception_during_stream_is_terminal() -> None:
     assert len(terminals) == 1
     assert isinstance(terminals[0], TextFailed)
     assert terminals[0].failure.code is FailureCode.PROVIDER_ERROR
-    assert "socket died" in terminals[0].failure.message
+    assert terminals[0].failure.message == "Provider request failed."
+    assert "socket died" not in terminals[0].failure.message
 
 
 @pytest.mark.asyncio
@@ -476,4 +479,21 @@ async def test_stream_duplicate_provider_terminal_emits_one() -> None:
     terminals = [event for event in events if isinstance(event, (TextCompleted, TextFailed))]
     assert len(terminals) == 1
     assert isinstance(terminals[0], TextFailed)
-    assert terminals[0].failure.message == "first"
+    assert terminals[0].failure.code is FailureCode.PROVIDER_ERROR
+    assert terminals[0].failure.message == "Provider request failed."
+
+
+def test_map_provider_exception_does_not_leak_exception_text() -> None:
+    from generationengine.client import _map_provider_exception
+
+    leaked = RuntimeError("Authorization Bearer sk-live https://api.openai.com/v1/responses")
+    error = _map_provider_exception(leaked)
+    assert error.failure.code is FailureCode.PROVIDER_ERROR
+    assert error.failure.message == "Provider request failed."
+    assert "sk-live" not in error.failure.message
+    assert "openai.com" not in error.failure.message
+
+    timeout = _map_provider_exception(TimeoutError("waited 45s for sk-live"))
+    assert timeout.failure.code is FailureCode.PROVIDER_TIMEOUT
+    assert timeout.failure.message == "Provider request timed out."
+    assert "sk-live" not in timeout.failure.message

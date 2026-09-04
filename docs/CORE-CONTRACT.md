@@ -250,6 +250,14 @@ Public failures are GenerationEngine types, not OpenAI/Fal/httpx exceptions.
 
 Retryable `yes` means GenerationEngine may retry according to policy. Retryable `unknown` means do not retry inside the core; surface the code and let the product decide.
 
+`InferenceFailure.message` is a safe, non-secret public string. Provider-transport codes use stable messages and must not include SDK, HTTP, or exception text:
+
+```text
+PROVIDER_TIMEOUT      "Provider request timed out."
+PROVIDER_UNAVAILABLE  "Provider is unavailable."
+PROVIDER_ERROR        "Provider request failed."
+```
+
 Do not collapse distinct states into `INTERNAL_ERROR`.
 
 ---

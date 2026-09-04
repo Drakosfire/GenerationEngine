@@ -33,6 +33,15 @@ class Retryability(str, Enum):
     UNKNOWN = "unknown"
 
 
+# Provider-transport codes must not carry SDK/HTTP/exception text. Raw detail
+# may remain on the exception chain or other internal diagnostics.
+PROVIDER_SAFE_MESSAGES: dict[FailureCode, str] = {
+    FailureCode.PROVIDER_TIMEOUT: "Provider request timed out.",
+    FailureCode.PROVIDER_UNAVAILABLE: "Provider is unavailable.",
+    FailureCode.PROVIDER_ERROR: "Provider request failed.",
+}
+
+
 FAILURE_RETRYABILITY: dict[FailureCode, Retryability] = {
     FailureCode.CONFIGURATION_UNAVAILABLE: Retryability.NO,
     FailureCode.UNSUPPORTED_CAPABILITY: Retryability.NO,
@@ -57,5 +66,9 @@ class InferenceFailure(BaseModel):
     retryability: Retryability
 
     @classmethod
-    def from_code(cls, code: FailureCode, message: str) -> InferenceFailure:
+    def from_code(cls, code: FailureCode, message: str | None = None) -> InferenceFailure:
+        if code in PROVIDER_SAFE_MESSAGES:
+            message = PROVIDER_SAFE_MESSAGES[code]
+        elif not message:
+            raise ValueError(f"{code.value} requires a GenerationEngine-owned message")
         return cls(code=code, message=message, retryability=FAILURE_RETRYABILITY[code])

@@ -160,10 +160,7 @@ class GenerationClient:
         except TimeoutError:
             if not terminal:
                 yield _stream_failure(
-                    failure=InferenceFailure.from_code(
-                        FailureCode.PROVIDER_TIMEOUT,
-                        f"Operation timed out after {deadline_s:g}s",
-                    ),
+                    failure=InferenceFailure.from_code(FailureCode.PROVIDER_TIMEOUT),
                     request=request,
                     resolution=resolution,
                     started=started,
@@ -431,11 +428,8 @@ def _remaining_s(started: float, deadline_s: float) -> float:
     return deadline_s - (time.monotonic() - started)
 
 
-def _timeout_error(deadline_s: float, *, retry_count: int) -> ProviderError:
-    error = ProviderError.from_code(
-        FailureCode.PROVIDER_TIMEOUT,
-        f"Operation timed out after {deadline_s:g}s",
-    )
+def _timeout_error(_deadline_s: float, *, retry_count: int) -> ProviderError:
+    error = ProviderError.from_code(FailureCode.PROVIDER_TIMEOUT)
     error.retry_count = retry_count
     return error
 
@@ -510,7 +504,7 @@ def _public_stream_terminal(
             ),
         )
     return TextFailed(
-        failure=event.failure,
+        failure=_public_failure(event.failure),
         observation=_failed_observation(
             failure=event.failure,
             request=request,
@@ -637,9 +631,24 @@ def _failed_observation(
     )
 
 
+def _public_failure(failure: InferenceFailure) -> InferenceFailure:
+    return InferenceFailure.from_code(failure.code, failure.message)
+
+
 def _map_provider_exception(exc: Exception) -> ProviderError:
     if isinstance(exc, ProviderError):
-        return exc
+        rebuilt = ProviderError.from_code(
+            exc.failure.code,
+            exc.failure.message,
+            provider_request_id=exc.provider_request_id,
+            provider_response_id=exc.provider_response_id,
+            response_model=exc.response_model,
+            input_tokens=exc.input_tokens,
+            cached_input_tokens=exc.cached_input_tokens,
+            output_tokens=exc.output_tokens,
+        )
+        rebuilt.retry_count = exc.retry_count
+        return rebuilt
     if isinstance(exc, TimeoutError):
-        return ProviderError.from_code(FailureCode.PROVIDER_TIMEOUT, str(exc) or "timed out")
-    return ProviderError.from_code(FailureCode.PROVIDER_ERROR, str(exc) or type(exc).__name__)
+        return ProviderError.from_code(FailureCode.PROVIDER_TIMEOUT)
+    return ProviderError.from_code(FailureCode.PROVIDER_ERROR)

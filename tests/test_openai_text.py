@@ -41,3 +41,23 @@ def test_request_id_is_http_id_not_response_object_id() -> None:
     )
     assert result.provider_request_id == "req_http"
     assert result.provider_response_id == "resp_abc"
+
+
+def test_openai_maps_sdk_errors_to_safe_public_messages() -> None:
+    from generationengine.failures import FailureCode
+
+    provider = OpenAITextProvider(client=SimpleNamespace())
+    error = provider._map_exception(
+        RuntimeError("Authorization Bearer sk-live HTTP 502 from api.openai.com")
+    )
+    assert error.failure.code is FailureCode.PROVIDER_ERROR
+    assert error.failure.message == "Provider request failed."
+    assert "sk-live" not in error.failure.message
+    assert "openai.com" not in error.failure.message
+
+    class FakeTimeoutError(Exception):
+        pass
+
+    timeout = provider._map_exception(FakeTimeoutError("waited 45s"))
+    assert timeout.failure.code is FailureCode.PROVIDER_TIMEOUT
+    assert timeout.failure.message == "Provider request timed out."
