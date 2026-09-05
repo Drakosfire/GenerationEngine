@@ -253,6 +253,7 @@ Retryable `yes` means GenerationEngine may retry according to policy. Retryable 
 `InferenceFailure.message` is a safe, non-secret public string. Provider-transport codes use stable messages and must not include SDK, HTTP, or exception text:
 
 ```text
+RATE_LIMITED          "Provider rate limit exceeded."
 PROVIDER_TIMEOUT      "Provider request timed out."
 PROVIDER_UNAVAILABLE  "Provider is unavailable."
 PROVIDER_ERROR        "Provider request failed."

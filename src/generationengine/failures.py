@@ -36,6 +36,7 @@ class Retryability(str, Enum):
 # Provider-transport codes must not carry SDK/HTTP/exception text. Raw detail
 # may remain on the exception chain or other internal diagnostics.
 PROVIDER_SAFE_MESSAGES: dict[FailureCode, str] = {
+    FailureCode.RATE_LIMITED: "Provider rate limit exceeded.",
     FailureCode.PROVIDER_TIMEOUT: "Provider request timed out.",
     FailureCode.PROVIDER_UNAVAILABLE: "Provider is unavailable.",
     FailureCode.PROVIDER_ERROR: "Provider request failed.",

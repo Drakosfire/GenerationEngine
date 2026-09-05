@@ -61,3 +61,16 @@ def test_openai_maps_sdk_errors_to_safe_public_messages() -> None:
     timeout = provider._map_exception(FakeTimeoutError("waited 45s"))
     assert timeout.failure.code is FailureCode.PROVIDER_TIMEOUT
     assert timeout.failure.message == "Provider request timed out."
+
+    class FakeRateLimitError(Exception):
+        pass
+
+    rate_limited = provider._map_exception(
+        FakeRateLimitError(
+            "429 https://api.openai.com/v1/responses Authorization Bearer sk-live"
+        )
+    )
+    assert rate_limited.failure.code is FailureCode.RATE_LIMITED
+    assert rate_limited.failure.message == "Provider rate limit exceeded."
+    assert "sk-live" not in rate_limited.failure.message
+    assert "openai.com" not in rate_limited.failure.message

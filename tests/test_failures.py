@@ -62,10 +62,15 @@ def test_provider_transport_messages_are_stable_and_non_secret() -> None:
         FailureCode.PROVIDER_ERROR,
         "socket died while reading chunk",
     )
+    rate_limited = InferenceFailure.from_code(
+        FailureCode.RATE_LIMITED,
+        "429 https://api.openai.com/v1/responses Authorization Bearer sk-live",
+    )
     assert timeout.message == "Provider request timed out."
     assert unavailable.message == "Provider is unavailable."
     assert error.message == "Provider request failed."
-    for failure in (timeout, unavailable, error):
+    assert rate_limited.message == "Provider rate limit exceeded."
+    for failure in (timeout, unavailable, error, rate_limited):
         dumped = failure.model_dump_json().lower()
         assert "sk-live" not in dumped
         assert "openai.com" not in dumped

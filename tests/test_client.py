@@ -259,6 +259,7 @@ async def test_deadline_is_overall_budget_not_per_attempt(monkeypatch) -> None:
             TextRequest(user_prompt="hi", profile=InferenceProfile.TEXT_FAST, deadline_ms=80)
         )
     assert exc.value.failure.code is FailureCode.RATE_LIMITED
+    assert exc.value.failure.message == "Provider rate limit exceeded."
     assert provider.calls == 1
     assert exc.value.observation.retry_count == 0
     assert sleeps == []
