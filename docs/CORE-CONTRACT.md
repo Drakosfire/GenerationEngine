@@ -1,6 +1,6 @@
 # GenerationEngine core contract (target)
 
-**Status:** E2B landed core primitives. Live provider execution is still the pre-cutover implementation.  
+**Status:** Coordinated cutover implemented. Live execution is `GenerationClient` over OpenAI and Fal adapters.  
 **Current behavior:** [CURRENT-STATE.md](CURRENT-STATE.md)  
 **Cutover inventory:** [COMPATIBILITY.md](COMPATIBILITY.md)
 
@@ -103,6 +103,7 @@ text_fast
 structured_low_cost
 structured_high_reliability
 image_high_quality
+image_edit_high_quality
 ```
 <!-- /ACCEPTED_PROFILES -->
 
@@ -165,6 +166,7 @@ InferenceObservation
   resolved_model        str | None
   response_model        str | None
   provider_request_id   str | None
+  provider_response_id  str | None
   input_tokens          int | None
   cached_input_tokens   int | None
   output_tokens         int | None
@@ -238,7 +240,7 @@ Public failures are GenerationEngine types, not OpenAI/Fal/httpx exceptions.
 | `INVALID_REQUEST` | caller-owned request failed GE validation | no | field/reason | no |
 | `PROVIDER_REFUSED` | provider content-policy / refusal | no | sanitized provider message | no, unless provider also returned usable content (then `state=refused` with content + observation) |
 | `RATE_LIMITED` | provider 429 / quota | yes | retry-after if present | no |
-| `PROVIDER_TIMEOUT` | attempt deadline exceeded | yes | timeout budget | no |
+| `PROVIDER_TIMEOUT` | overall inference budget exceeded | yes | timeout budget | no |
 | `PROVIDER_UNAVAILABLE` | 5xx, overload, transport outage | yes | status if present | no |
 | `PROVIDER_ERROR` | other provider/transport error | unknown | sanitized message | no |
 | `MALFORMED_PROVIDER_RESPONSE` | unusable payload from provider | no | reason | no |
@@ -247,6 +249,15 @@ Public failures are GenerationEngine types, not OpenAI/Fal/httpx exceptions.
 | `INTERNAL_ERROR` | unexpected core defect | no | generic message | no |
 
 Retryable `yes` means GenerationEngine may retry according to policy. Retryable `unknown` means do not retry inside the core; surface the code and let the product decide.
+
+`InferenceFailure.message` is a safe, non-secret public string. Provider-transport codes use stable messages and must not include SDK, HTTP, or exception text:
+
+```text
+RATE_LIMITED          "Provider rate limit exceeded."
+PROVIDER_TIMEOUT      "Provider request timed out."
+PROVIDER_UNAVAILABLE  "Provider is unavailable."
+PROVIDER_ERROR        "Provider request failed."
+```
 
 Do not collapse distinct states into `INTERNAL_ERROR`.
 
@@ -272,7 +283,23 @@ TextCompleted(final_text, observation)
 TextFailed(failure, observation)
 ```
 
-Every stream must end with exactly one terminal event: `TextCompleted` or `TextFailed`. Partial deltas remain valid when a stream ends in `TextFailed` with `STREAM_INCOMPLETE`.
+Every stream must end with exactly one terminal event: `TextCompleted` or `TextFailed`. Partial deltas remain valid when a stream ends in `TextFailed`.
+
+`stream_text()` consumes the same overall `deadline_ms` budget as non-streaming calls. It does **not** retry after output has begun. Construction/config failures, provider exceptions, overall-budget timeouts, and duplicate provider terminals are all normalized to that single public terminal:
+
+```text
+partial stream + deadline
+  → exactly one TextFailed(PROVIDER_TIMEOUT)
+
+provider/config failure before first delta
+  → exactly one TextFailed
+
+provider exception during stream
+  → exactly one TextFailed
+
+duplicate provider terminal
+  → only one public terminal
+```
 
 Product backends translate those events into SSE, WebSocket, CLI, or other transports.
 
@@ -318,9 +345,9 @@ Product backend
 Cloudflare / R2 / etc.
 ```
 
-Current `ImageService.generate()` → Cloudflare URL is pre-cutover behavior. The coordinated cutover lands artifact-free `GeneratedImage` results, moves Cloudflare persistence to DungeonMindServer, and deletes the URL-returning inference-core path in the same change.
+`GenerationClient.generate_image()` / `edit_image()` return `GeneratedImage` bytes. DungeonMindServer owns Cloudflare persistence.
 
-Image persistence helpers are not part of the inference core. `UploadService` may remain in-tree until that cutover, labeled as such, and must not be required to construct text or generation-only clients.
+Image persistence helpers are not part of the inference core. `UploadService` is deleted.
 
 ---
 
@@ -330,7 +357,7 @@ A text-only consumer must be able to construct and call text generation without 
 
 A Fal image consumer must fail with `CONFIGURATION_UNAVAILABLE` / `UNSUPPORTED_CAPABILITY` when Fal is requested without the extra or credentials.
 
-Recommended packaging (implemented in E2B):
+Recommended packaging:
 
 ```text
 core:         pydantic, httpx, tenacity
@@ -339,9 +366,9 @@ fal extra:    fal-client
 dev group:    pytest, pytest-asyncio, ruff
 ```
 
-E2B lazy-loads legacy `TextGenerationService` and `ImageService` from the package root so a core-only wheel import does not require provider extras. CI proves that boundary with an isolated built-wheel import step.
+`GenerationClient.from_env()` lazy-loads OpenAI and Fal adapters on first use so a core-only wheel import does not require provider extras. CI proves that boundary with an isolated built-wheel import step.
 
-Cloudflare is not a GenerationEngine inference dependency in the target design.
+Cloudflare is not a GenerationEngine inference dependency.
 
 Do not create separate provider packages in E2 unless the extras model proves insufficient.
 

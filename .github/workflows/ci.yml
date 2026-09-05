@@ -36,7 +36,8 @@ jobs:
           import generationengine as ge
 
           assert ge.__version__
-          assert "TextGenerationService" in ge.__all__
+          assert "GenerationClient" in ge.__all__
+          assert "TextGenerationService" not in ge.__all__
           assert "InferenceObservation" in ge.__all__
           assert "TextCompleted" in ge.__all__
           assert "TextFailed" in ge.__all__

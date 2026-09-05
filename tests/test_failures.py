@@ -43,6 +43,35 @@ def test_public_failure_does_not_require_provider_sdk_exceptions() -> None:
     )
     assert failure.code is FailureCode.PROVIDER_UNAVAILABLE
     assert failure.retryability is Retryability.YES
+    assert failure.message == "Provider is unavailable."
     assert "openai" not in failure.model_dump_json().lower()
     dumped = failure.model_dump()
     assert set(dumped) == {"code", "message", "retryability"}
+
+
+def test_provider_transport_messages_are_stable_and_non_secret() -> None:
+    timeout = InferenceFailure.from_code(
+        FailureCode.PROVIDER_TIMEOUT,
+        "Waited 45s: Authorization Bearer sk-live",
+    )
+    unavailable = InferenceFailure.from_code(
+        FailureCode.PROVIDER_UNAVAILABLE,
+        "HTTP 503 from https://api.openai.com/v1/responses",
+    )
+    error = InferenceFailure.from_code(
+        FailureCode.PROVIDER_ERROR,
+        "socket died while reading chunk",
+    )
+    rate_limited = InferenceFailure.from_code(
+        FailureCode.RATE_LIMITED,
+        "429 https://api.openai.com/v1/responses Authorization Bearer sk-live",
+    )
+    assert timeout.message == "Provider request timed out."
+    assert unavailable.message == "Provider is unavailable."
+    assert error.message == "Provider request failed."
+    assert rate_limited.message == "Provider rate limit exceeded."
+    for failure in (timeout, unavailable, error, rate_limited):
+        dumped = failure.model_dump_json().lower()
+        assert "sk-live" not in dumped
+        assert "openai.com" not in dumped
+        assert "socket died" not in dumped

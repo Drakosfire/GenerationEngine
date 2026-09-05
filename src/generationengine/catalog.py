@@ -20,6 +20,7 @@ class InferenceProfile(str, Enum):
     STRUCTURED_LOW_COST = "structured_low_cost"
     STRUCTURED_HIGH_RELIABILITY = "structured_high_reliability"
     IMAGE_HIGH_QUALITY = "image_high_quality"
+    IMAGE_EDIT_HIGH_QUALITY = "image_edit_high_quality"
 
 
 class Availability(str, Enum):
