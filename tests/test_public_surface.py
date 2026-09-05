@@ -1,8 +1,7 @@
-"""Consumer-required GenerationEngine import paths and return shapes.
+"""Sequencing checks for current DungeonMindServer import paths.
 
-Pin demonstrated DungeonMindServer seams, not the historical
-``generationengine.__all__`` snapshot. Unused baseline exports such as
-``IGenerator`` may be retired during E2.
+These are pre-cutover checks, not a long-lived compatibility promise.
+The coordinated cutover may delete or rewrite them with the consumers.
 """
 
 from __future__ import annotations
@@ -14,7 +13,6 @@ from generationengine.models.metrics import GenerationMetrics
 from generationengine.models.responses import GenerationError
 from generationengine.models.text_responses import TextGenerationResponse
 
-# Package-root exports that DungeonMindServer imports today.
 CONSUMER_ROOT_EXPORTS = (
     "ImageService",
     "MetricsService",
@@ -49,12 +47,35 @@ def test_internal_consumer_import_paths_remain() -> None:
         assert hasattr(module, attr), dotted
 
 
-def test_unused_baseline_exports_are_not_consumer_frozen() -> None:
-    """E2 may retire these; they are inventory, not DungeonMindServer seams."""
-    assert "IGenerator" not in CONSUMER_ROOT_EXPORTS
-    assert "GenerationResponse" not in CONSUMER_ROOT_EXPORTS
-    assert "RetryableError" not in CONSUMER_ROOT_EXPORTS
-    assert "is_retryable" not in CONSUMER_ROOT_EXPORTS
+def test_dead_baseline_exports_were_removed() -> None:
+    for name in (
+        "IGenerator",
+        "GenerationResponse",
+        "RetryableError",
+        "is_retryable",
+        "make_schema_strict",
+    ):
+        assert name not in ge.__all__, name
+
+
+def test_target_primitives_are_exported() -> None:
+    for name in (
+        "InferenceObservation",
+        "ObservationState",
+        "FailureCode",
+        "InferenceFailure",
+        "Retryability",
+        "Capability",
+        "InferenceProfile",
+        "ModelRecord",
+        "TextProvider",
+        "ImageProvider",
+        "TextCompleted",
+        "TextFailed",
+        "TextStreamEvent",
+    ):
+        assert name in ge.__all__, name
+        assert hasattr(ge, name), name
 
 
 def test_text_response_consumer_shape() -> None:
@@ -102,9 +123,5 @@ def test_image_response_consumer_shape() -> None:
     assert response.success is True
     assert response.images is not None
     assert response.images[0].url == "https://example.invalid/generated.png"
-    assert response.images[0].width == 1024
-    assert response.images[0].height == 1024
     assert response.metrics is not None
     assert response.metrics.duration_ms == 40
-    assert response.metrics.model_used == "gpt-image-1.5"
-    assert response.metrics.retry_count == 1

@@ -1,8 +1,8 @@
 # GenerationEngine core contract (target)
 
-**Status:** ACCEPTED design for E2 implementation. Not implemented by E2A.  
+**Status:** E2B landed core primitives. Live provider execution is still the pre-cutover implementation.  
 **Current behavior:** [CURRENT-STATE.md](CURRENT-STATE.md)  
-**Compatibility:** [COMPATIBILITY.md](COMPATIBILITY.md) — consumer seams until E3; unused baseline exports may change in E2
+**Cutover inventory:** [COMPATIBILITY.md](COMPATIBILITY.md)
 
 GenerationEngine is an in-process inference capability. It is not a product backend, not a network service, and not an Agent runtime.
 
@@ -83,7 +83,7 @@ After the provider reset:
 - provider SDK exception types must not be the public contract
 - advertised providers must match registered wiring and declared extras
 
-`ImageProvider` already exists as a protocol. `TextProvider` does not. E2C introduces `TextProvider` and moves `AsyncOpenAI` behind it. E2D makes advertised image providers truthful and keeps `ImageProvider` as the image seam.
+`ImageProvider` already exists as a protocol. E2B adds `TextProvider`. The coordinated cutover moves live OpenAI/Fal execution behind these seams.
 
 ---
 
@@ -272,9 +272,11 @@ TextCompleted(final_text, observation)
 TextFailed(failure, observation)
 ```
 
+Every stream must end with exactly one terminal event: `TextCompleted` or `TextFailed`. Partial deltas remain valid when a stream ends in `TextFailed` with `STREAM_INCOMPLETE`.
+
 Product backends translate those events into SSE, WebSocket, CLI, or other transports.
 
-E2A already found no DungeonMindServer caller of `generate_stream`. E2C may replace SSE framing with transport-neutral events. An SSE adapter is optional, not an E3-protected facade. E2A does not remove the current method.
+E2A found no DungeonMindServer caller of legacy `generate_stream`. The coordinated cutover replaces SSE framing with these transport-neutral events and deletes the old streaming surface.
 
 ---
 
@@ -316,9 +318,9 @@ Product backend
 Cloudflare / R2 / etc.
 ```
 
-Current `ImageService.generate()` → Cloudflare URL is a compatibility facade. E2D introduces the artifact-free result and, if needed, a URL-returning adapter so DungeonMindServer can keep working until E3 migrates persistence to the product side.
+Current `ImageService.generate()` → Cloudflare URL is pre-cutover behavior. The coordinated cutover lands artifact-free `GeneratedImage` results, moves Cloudflare persistence to DungeonMindServer, and deletes the URL-returning inference-core path in the same change.
 
-Image persistence helpers are not part of the inference core. `UploadService` may remain in-tree during compatibility, labeled as such, and must not be required to construct text or generation-only clients.
+Image persistence helpers are not part of the inference core. `UploadService` may remain in-tree until that cutover, labeled as such, and must not be required to construct text or generation-only clients.
 
 ---
 
@@ -328,14 +330,16 @@ A text-only consumer must be able to construct and call text generation without 
 
 A Fal image consumer must fail with `CONFIGURATION_UNAVAILABLE` / `UNSUPPORTED_CAPABILITY` when Fal is requested without the extra or credentials.
 
-Recommended packaging (implemented in E2B, not E2A):
+Recommended packaging (implemented in E2B):
 
 ```text
-core:        pydantic, httpx, tenacity
+core:         pydantic, httpx, tenacity
 openai extra: openai
 fal extra:    fal-client
-dev extra:    pytest, pytest-asyncio, ruff
+dev group:    pytest, pytest-asyncio, ruff
 ```
+
+E2B lazy-loads legacy `TextGenerationService` and `ImageService` from the package root so a core-only wheel import does not require provider extras. CI proves that boundary with an isolated built-wheel import step.
 
 Cloudflare is not a GenerationEngine inference dependency in the target design.
 
@@ -343,21 +347,13 @@ Do not create separate provider packages in E2 unless the extras model proves in
 
 ---
 
-## 11. Compatibility policy
+## 11. Cutover policy
 
-E2A defines the target. It does not replace current DungeonMindServer imports.
+E2B does not replace current DungeonMindServer imports because that product is not in this PR.
 
-Preserve **demonstrated consumer imports and return shapes** until E3 migrates those callers. See [COMPATIBILITY.md](COMPATIBILITY.md).
+The next slice moves GenerationEngine and DungeonMindServer together, then deletes obsolete GE surfaces immediately. See [COMPATIBILITY.md](COMPATIBILITY.md).
 
-Historical `__all__` entries with no consumer are baseline inventory, not an E3 freeze. E2B may retire unused product-tainted surfaces such as `IGenerator`.
-
-Rule: transition before demolition applies to live seams:
-
-```text
-keep URL-returning ImageService.generate while Server still consumes .url
-keep TextGenerationService / TextGenerationRequest / TextModel while Server imports them
-do not keep generate_stream SSE or IGenerator merely because they exist on the package
-```
+Do not add deprecation frameworks, dual APIs, or SSE/URL adapters to stretch old surfaces past that cutover.
 
 ---
 

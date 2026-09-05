@@ -1,8 +1,48 @@
-# GenerationEngine current state (E2A characterization)
+# GenerationEngine current state
 
-**Baseline:** `f6f0fa95c745e4201785f3cf1d29d853e603a592` (`feat(GenerationEngine): add inpainting and mask support`, 2026-01-09)  
+**E2B branch:** trustworthy core primitives (see below)  
+**E2A baseline commit:** `f6f0fa95c745e4201785f3cf1d29d853e603a592`  
+**Target contract:** [CORE-CONTRACT.md](CORE-CONTRACT.md)  
+**Cutover inventory:** [COMPATIBILITY.md](COMPATIBILITY.md)
+
+This file separates **E2B current repo truth** from the **E2A baseline audit** preserved below for cutover evidence.
+
+---
+
+## E2B current truth (this PR)
+
+```text
+CI: .github/workflows/ci.yml on 3.11 + 3.13, credential-free
+tests: 80+ passing after baseline fixture repairs
+tracked bytecode: 0
+core deps: pydantic, httpx, tenacity
+openai extra: openai (not core)
+fal extra: fal-client
+dev group: pytest, pytest-asyncio, ruff
+provider-free wheel import: CI step + local test prove core-only install imports generationengine
+package root: lazy-loads TextGenerationService and ImageService
+primitives: InferenceObservation, FailureCode, catalog/profiles, TextProvider/ImageProvider
+stream contract: TextDelta, TextCompleted, TextFailed (terminal events required)
+legacy metrics: prompt bodies no longer stored; lengths/schema hash only
+removed public API: IGenerator, GenerationResponse, package-root RetryableError/is_retryable/make_schema_strict
+live execution: still pre-cutover TextGenerationService/ImageService (OpenAI/Fal/Cloudflare paths unchanged)
+```
+
+What E2B does **not** claim:
+
+```text
+OpenAI/Fal execution moved behind TextProvider/ImageProvider yet
+InferenceObservation populated on live paths yet
+DungeonMindServer consumers migrated
+long-lived compatibility architecture for old GE surfaces
+```
+
+---
+
+## E2A baseline audit (historical; pre-E2B)
+
 **Characterization date:** 2026-08-31  
-**This document describes implemented behavior.** The target contract is [CORE-CONTRACT.md](CORE-CONTRACT.md). Do not treat this file as desired architecture.
+The sections below describe the repository **before E2B**. Do not treat them as current packaging or test status.
 
 ---
 
@@ -47,7 +87,7 @@ pytest: installed because it is a runtime dependency (packaging smell)
 | Fal.ai | Required for `ImageService` to register providers. `fal-client` is still undeclared; missing Fal leaves an empty provider map after Cloudflare construction succeeds. |
 | Metrics tracking | `GenerationMetrics` plus in-memory `MetricsService` stub. Full system prompt (text) / full image prompt stored in `input`. No provider, request ID, cached tokens, response model, or normalized failure state. |
 | Robust retry with exponential backoff | `retry_with_backoff` exists (3 attempts, 1s/2s/4s). Text success path never records actual retry count (`retry_count` stays `0`, or is hard-coded to `3` after exhaustion). |
-| `IGenerator.generator_type` documents `statblock`, `card`, `character`, `store` | Product vocabulary in the shared protocol. No production implementer. Baseline inventory, not a consumer seam; E2B may retire it. |
+| `IGenerator.generator_type` | Removed in E2B. No DungeonMindServer consumer. |
 
 ---
 
@@ -113,10 +153,12 @@ normalized completion/failure state
 failure_code
 ```
 
-Retention:
+Retention (E2B):
 
-- text `input` JSON includes the **full system prompt** and user-prompt **length**
-- image `input` JSON includes the **full prompt**
+- text metrics `input` JSON includes prompt **lengths**, model, temperature, optional schema name/hash — not prompt bodies
+- image metrics `input` JSON includes `image_prompt_length` and mode flags — not prompt bodies
+- `InferenceObservation` is the target type and has no prompt/response fields
+- live execution still records `GenerationMetrics`; it does not yet populate `InferenceObservation`
 - text `output` JSON includes content length and token counts (when serializable)
 
 MagicMock usage objects make `json.dumps` of token fields raise, and the service collapses that into `INTERNAL_ERROR`. That is why three text-service tests fail on a clean baseline (see Tests below).
@@ -254,9 +296,8 @@ TextModel / pricing limited to gpt-5.1
 Fal-only ImageService wiring despite OpenAIImageProvider
 undeclared fal-client
 mandatory Cloudflare uploader construction
-product vocabulary on IGenerator.generator_type
+product vocabulary on IGenerator.generator_type (removed in E2B)
 SSE framing and [DONE]/[ERROR] sentinels inside the engine
-prompt retention in GenerationMetrics.input
 retry_count not observed from actual attempts
 structured parse failure reported as success
 tracked bytecode / no gitignore / no CI

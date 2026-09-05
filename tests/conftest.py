@@ -1,9 +1,8 @@
 """Shared pytest fixtures for GenerationEngine tests."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from generationengine.providers.base import ImageProvider
+import pytest
 
 
 class MockImageProvider:

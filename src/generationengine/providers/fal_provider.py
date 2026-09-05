@@ -153,7 +153,7 @@ class FalProvider:
         endpoint = model_endpoints.get(model)
         if not endpoint:
             raise ValueError(f"Unsupported Fal model: {model}")
-        
+
         # Switch to edit endpoint for inpainting (when base image provided)
         is_inpainting = base_image_base64 is not None
         if is_inpainting:
@@ -250,7 +250,7 @@ class FalProvider:
         # Log request details
         logger.info(f"🎨 [FalProvider] Calling endpoint: {endpoint}")
         logger.info(f"🎨 [FalProvider] Model: {model}, num_images: {num_images}, size: {size}")
-        
+
         # Log inpainting details if present
         if is_inpainting:
             base_size_kb = len(base_image_base64) / 1024  # type: ignore
@@ -259,11 +259,11 @@ class FalProvider:
                 mask_size_kb = len(mask_base64) / 1024
                 logger.info(f"🖼️ [FalProvider] Mask provided: {mask_size_kb:.1f}KB")
             logger.info(f"🖼️ [FalProvider] Using {model} EDIT endpoint with image_urls array")
-        
+
         # Log negative prompt if present
         if negative_prompt:
             logger.info(f"🚫 [FalProvider] Negative prompt: {negative_prompt[:100]}{'...' if len(negative_prompt) > 100 else ''}")
-        
+
         try:
             # Use subscribe_async for non-blocking async operation
             # IMPORTANT: fal_client.subscribe() is BLOCKING and will freeze the event loop!

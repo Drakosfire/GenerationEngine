@@ -14,6 +14,7 @@ from generationengine.providers.base import ImageProvider
 from generationengine.providers.fal_provider import FalProvider
 from generationengine.services.retry_service import RetryableError, retry_with_backoff, should_retry
 from generationengine.services.upload_service import UploadService
+from generationengine.telemetry import bounded_image_metrics_input
 
 
 class ImageService:
@@ -65,17 +66,7 @@ class ImageService:
         start_time = time.time()
         retry_count = 0
 
-        # Serialize input for metrics
-        input_json = json.dumps({
-            "prompt": request.prompt,
-            "model": request.model.value,
-            "num_images": request.num_images,
-            "size": request.size.value,
-            "image_url": request.image_url if request.image_url else None,
-            "strength": request.strength if request.strength else None,
-            "has_mask": request.mask_base64 is not None,
-            "has_base_image": request.base_image_base64 is not None,
-        })
+        input_json = json.dumps(bounded_image_metrics_input(request))
 
         try:
             # Determine provider based on model
@@ -98,11 +89,11 @@ class ImageService:
                 image_url = request.image_url if request.image_url else None
                 # Default strength to 0.85 if image_url provided but strength not specified
                 strength = request.strength if request.strength is not None else (0.85 if image_url else None)
-                
+
                 # Extract inpainting parameters
                 mask_base64 = request.mask_base64 if request.mask_base64 else None
                 base_image_base64 = request.base_image_base64 if request.base_image_base64 else None
-                
+
                 # Extract negative prompt
                 negative_prompt = request.negative_prompt if request.negative_prompt else None
 

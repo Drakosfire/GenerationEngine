@@ -1,12 +1,13 @@
 """Tests for image generation service and models."""
 
-import pytest
 from datetime import datetime
 
-from generationengine.models.requests import ImageGenerationRequest, ImageModel, ImageSize
-from generationengine.models.image_responses import ImageGenerationResponse, ImageResult
+import pytest
+
 from generationengine.models.errors import ErrorCode
+from generationengine.models.image_responses import ImageGenerationResponse, ImageResult
 from generationengine.models.metrics import GenerationMetrics
+from generationengine.models.requests import ImageGenerationRequest, ImageModel, ImageSize
 
 
 # Contract tests for ImageGenerationRequest

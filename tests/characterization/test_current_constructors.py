@@ -25,9 +25,17 @@ def _without_provider_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(key, raising=False)
 
 
-def test_clean_install_does_not_include_fal_client() -> None:
-    with pytest.raises(importlib.metadata.PackageNotFoundError):
-        importlib.metadata.version("fal-client")
+def test_fal_client_is_not_a_core_required_dependency() -> None:
+    """Fal is an optional extra; dev env may install it for tests."""
+    requires = importlib.metadata.requires("generationengine") or []
+    required_names = []
+    for req in requires:
+        name = req.split(";")[0].split("[")[0].split(">")[0].split("=")[0].split("<")[0].strip().lower()
+        extra = "extra ==" in req or "extra==" in req
+        if not extra:
+            required_names.append(name)
+    assert "fal-client" not in required_names
+    assert "fal_client" not in required_names
 
 
 def test_text_service_requires_openai_key_today(monkeypatch: pytest.MonkeyPatch) -> None:

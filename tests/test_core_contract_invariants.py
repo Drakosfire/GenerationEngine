@@ -39,7 +39,7 @@ REQUIRED_CONTRACT_HEADINGS = (
     "Structured output",
     "Image generation vs artifact persistence",
     "Credentials and optional capabilities",
-    "Compatibility policy",
+    "Cutover policy",
 )
 
 
@@ -107,8 +107,8 @@ def test_image_persistence_is_outside_the_inference_core() -> None:
     assert "durable publication is outside the inference core" in text
 
 
-def test_fal_client_is_not_a_core_required_dependency() -> None:
-    """Text-only / core install must not pull Fal. Target extras land in E2B."""
+def test_openai_is_not_a_core_required_dependency() -> None:
+    """OpenAI is an optional extra; core install must not require it."""
     requires = importlib.metadata.requires("generationengine") or []
     required_names = []
     for req in requires:
@@ -116,5 +116,37 @@ def test_fal_client_is_not_a_core_required_dependency() -> None:
         extra = "extra ==" in req or "extra==" in req
         if not extra:
             required_names.append(name)
+    assert "openai" not in required_names
     assert "fal-client" not in required_names
     assert "fal_client" not in required_names
+
+
+def test_built_wheel_imports_without_provider_extras(tmp_path: Path) -> None:
+    """Isolated wheel install must import the package without openai or fal-client."""
+    import subprocess
+
+    repo = Path(__file__).resolve().parents[1]
+    subprocess.run(["uv", "build"], check=True, cwd=repo)
+    wheel = next((repo / "dist").glob("*.whl"))
+    venv_dir = tmp_path / "venv"
+    subprocess.run(["uv", "venv", str(venv_dir)], check=True, cwd=repo)
+    py = venv_dir / "bin" / "python"
+    subprocess.run(
+        ["uv", "pip", "install", "--python", str(py), str(wheel)],
+        check=True,
+        cwd=repo,
+        capture_output=True,
+    )
+    result = subprocess.run(
+        [
+            str(py),
+            "-c",
+            "import generationengine as ge; "
+            "assert ge.InferenceObservation; "
+            "assert 'TextGenerationService' in ge.__all__",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0

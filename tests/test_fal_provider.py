@@ -1,10 +1,10 @@
 """Tests for Fal image provider."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from generationengine.providers.fal_provider import FalProvider
-from generationengine.models.errors import ErrorCode
 
 
 @pytest.mark.asyncio
@@ -48,8 +48,8 @@ async def test_fal_provider_generate_timeout():
 
         provider = FalProvider(api_key="test-key")
 
-        from generationengine.services.retry_service import RetryableError
         from generationengine.models.errors import ErrorCode
+        from generationengine.services.retry_service import RetryableError
         with pytest.raises(RetryableError) as exc_info:
             await provider.generate(
                 prompt="A red dragon",
@@ -94,7 +94,7 @@ async def test_fal_provider_inpainting_flux_2_pro():
 
             assert len(result) == 1
             assert all(isinstance(img, bytes) for img in result)
-            
+
             # Verify fal_client.subscribe_async was called with inpainting endpoint
             mock_fal_client.subscribe_async.assert_called_once()
             call_args = mock_fal_client.subscribe_async.call_args

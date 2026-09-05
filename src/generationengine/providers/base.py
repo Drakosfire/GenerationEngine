@@ -1,8 +1,71 @@
-"""Base provider interface for image generation."""
+"""Provider protocols for GenerationEngine.
 
-from typing import Protocol, Tuple
+These seams are for the coordinated cutover. E2B does not move live OpenAI/Fal
+execution behind them.
+"""
 
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from typing import Any, Protocol, Tuple, Union
+
+from pydantic import BaseModel, Field
 from typing_extensions import runtime_checkable
+
+from generationengine.failures import InferenceFailure
+from generationengine.observation import InferenceObservation
+
+
+class TextGenerationCall(BaseModel):
+    """Provider-neutral text call. No product schemas or SSE framing."""
+
+    model: str
+    user_prompt: str
+    system_prompt: str | None = None
+    temperature: float = 0.7
+    json_schema: dict[str, Any] | None = None
+    schema_name: str | None = None
+
+
+class TextDelta(BaseModel):
+    text: str
+
+
+class TextCompleted(BaseModel):
+    final_text: str
+    observation: InferenceObservation
+
+
+class TextFailed(BaseModel):
+    failure: InferenceFailure
+    observation: InferenceObservation
+
+
+TextStreamEvent = Union[TextDelta, TextCompleted, TextFailed]
+
+
+class TextGenerationResult(BaseModel):
+    text: str | None = None
+    parsed: dict[str, Any] | None = None
+    refused: bool = False
+    provider_request_id: str | None = None
+    response_model: str | None = None
+    input_tokens: int | None = Field(default=None, ge=0)
+    cached_input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+
+
+@runtime_checkable
+class TextProvider(Protocol):
+    """Execute text / structured text without exposing SDK types."""
+
+    async def generate(self, call: TextGenerationCall) -> TextGenerationResult:
+        """Return a completed text result."""
+        ...
+
+    def stream(self, call: TextGenerationCall) -> AsyncIterator[TextStreamEvent]:
+        """Yield transport-neutral stream events ending in TextCompleted or TextFailed."""
+        ...
 
 
 @runtime_checkable
@@ -24,22 +87,6 @@ class ImageProvider(Protocol):
         """
         Generate images from a prompt.
 
-        Args:
-            prompt: Text prompt for image generation
-            model: Model identifier (e.g., "flux-2-pro", "nano-banana-pro", "gpt-image-1.5")
-            num_images: Number of images to generate (1-8)
-            size: Output size as (width, height) tuple
-            image_url: Optional source image URL for image-to-image generation
-            strength: Transformation strength for image-to-image (0.0-1.0)
-            mask_base64: Optional base64-encoded PNG mask for inpainting
-            base_image_base64: Optional base64-encoded PNG base image for inpainting
-            negative_prompt: Elements to exclude from generation (e.g., "grid, text")
-
-        Returns:
-            List of image bytes (one per generated image)
-
-        Raises:
-            Exception: Provider-specific errors
+        Returns image bytes. Durable publication is not part of this protocol.
         """
         ...
-

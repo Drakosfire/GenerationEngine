@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, AsyncGenerator
 
 try:
-    from openai import AsyncOpenAI, RateLimitError, APITimeoutError, APIError
+    from openai import APIError, APITimeoutError, AsyncOpenAI, RateLimitError
 except ImportError:
     # OpenAI not available - define stubs for type checking
     AsyncOpenAI = object  # type: ignore
@@ -25,6 +25,7 @@ from generationengine.models.requests import TextGenerationRequest
 from generationengine.models.responses import GenerationError
 from generationengine.models.text_responses import TextGenerationResponse
 from generationengine.services.retry_service import RetryableError, retry_with_backoff
+from generationengine.telemetry import bounded_text_metrics_input
 from generationengine.utils.schema_utils import make_schema_strict
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> flo
     pricing = MODEL_PRICING.get(model)
     if not pricing:
         return 0.0
-    
+
     prompt_cost = (prompt_tokens / 1000.0) * pricing["prompt"]
     completion_cost = (completion_tokens / 1000.0) * pricing["completion"]
     return prompt_cost + completion_cost
@@ -66,7 +67,7 @@ class TextGenerationService:
         api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("OpenAI API key is required. Set OPENAI_API_KEY environment variable or pass openai_api_key.")
-        
+
         self.openai_client = AsyncOpenAI(api_key=api_key)
         self._metrics_service = metrics_service
 
@@ -88,14 +89,7 @@ class TextGenerationService:
         start_time = time.time()
         retry_count = 0
 
-        # Serialize input for metrics
-        input_json = json.dumps({
-            "system_prompt": request.system_prompt,
-            "user_prompt_length": len(request.user_prompt),
-            "model": request.model.value,
-            "temperature": request.temperature,
-            "max_tokens": request.max_tokens,
-        })
+        input_json = json.dumps(bounded_text_metrics_input(request))
 
         try:
             # Build request kwargs for Responses API
@@ -104,11 +98,11 @@ class TextGenerationService:
                 "input": request.user_prompt,
                 "temperature": request.temperature,
             }
-            
+
             # Add instructions (system prompt) if provided
             if request.system_prompt:
                 request_kwargs["instructions"] = request.system_prompt
-            
+
             # Note: max_tokens is NOT supported in Responses API (non-streaming or streaming)
             # The Responses API doesn't have a token limit parameter
             if request.max_tokens:
@@ -186,7 +180,7 @@ class TextGenerationService:
             if structured_output and content:
                 try:
                     parsed_content = json.loads(content)
-                    logger.info(f"✅ [TextService] Structured output parsed successfully")
+                    logger.info("✅ [TextService] Structured output parsed successfully")
                 except json.JSONDecodeError as e:
                     # This should never happen with structured outputs, but handle gracefully
                     logger.error(f"❌ [TextService] Failed to parse structured output: {e}")
@@ -243,10 +237,10 @@ class TextGenerationService:
     ) -> AsyncGenerator[str, None]:
         """
         Generate text using OpenAI Responses API with streaming support.
-        
+
         Args:
             request: Text generation request
-            
+
         Yields:
             str: Text chunks in SSE format ("data: {content}\n\n")
         """
@@ -259,11 +253,11 @@ class TextGenerationService:
                 "input": str(request.user_prompt),  # Ensure string type
                 "temperature": float(request.temperature),  # Ensure float type
             }
-            
+
             # Add instructions (system prompt) if provided
             if request.system_prompt:
                 request_kwargs["instructions"] = str(request.system_prompt)  # Ensure string type
-            
+
             # Note: max_tokens is not supported in Responses API streaming
             if request.max_tokens:
                 logger.warning("📋 [TextService] max_tokens not supported in Responses API streaming mode, ignoring")
@@ -277,30 +271,30 @@ class TextGenerationService:
             # Ensure all values are JSON-serializable (strings, numbers, None)
             # The SDK may internally serialize these, so we need plain Python types
             stream_manager = self.openai_client.responses.stream(**request_kwargs)
-            
+
             # Use async context manager for stream
             async with stream_manager as response_stream:
                 async for event in response_stream:
                     event_type = getattr(event, "type", None)
-                    
+
                     if event_type == "response.output_text.delta":
                         content = getattr(event, "delta", "")
                         if content:
                             # Yield in SSE format
                             yield f"data: {content}\n\n"
-                    
+
                     elif event_type == "response.error":
                         error_message = getattr(getattr(event, "error", None), "message", "Unknown Responses error")
                         logger.error(f"❌ [TextService] Responses error event: {error_message}")
                         yield f"data: [ERROR]{error_message}\n\n"
                         return
-                    
+
                     elif event_type == "response.completed":
                         logger.debug("✅ [TextService] Responses stream completed")
-            
+
             # Send completion signal
             yield "data: [DONE]\n\n"
-            
+
         except Exception as e:
             logger.error(f"❌ [TextService] Streaming error: {str(e)}", exc_info=True)
             yield f"data: [ERROR]{str(e)}\n\n"

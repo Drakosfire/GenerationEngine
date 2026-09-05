@@ -1,7 +1,7 @@
 [project]
 name = "generationengine"
 version = "0.1.0"
-description = "Unified generation infrastructure for DungeonMind generators"
+description = "Provider-agnostic inference execution for DungeonMind products."
 authors = [
     {name = "Alan Meigs", email = "alan.meigs@gmail.com"},
 ]
@@ -11,15 +11,14 @@ dependencies = [
     "pydantic>=2.0.0",
     "httpx>=0.27.0",
     "tenacity>=8.2.0",
-    "openai>=2.14.0",
-    "pytest>=9.0.2",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=8.3.3",
-    "pytest-asyncio>=0.23.0",
-    "ruff>=0.1.0",
+openai = [
+    "openai>=2.14.0",
+]
+fal = [
+    "fal-client>=0.5.6",
 ]
 
 [build-system]
@@ -35,9 +34,14 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
 
 [dependency-groups]
 dev = [
+    "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
+    "ruff>=0.1.0",
 ]
-
