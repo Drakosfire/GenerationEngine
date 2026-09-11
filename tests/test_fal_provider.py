@@ -48,9 +48,9 @@ async def test_fal_provider_generate_timeout():
 
         provider = FalProvider(api_key="test-key")
 
-        from generationengine.models.errors import ErrorCode
-        from generationengine.services.retry_service import RetryableError
-        with pytest.raises(RetryableError) as exc_info:
+        from generationengine.failures import FailureCode
+        from generationengine.providers.errors import ProviderError
+        with pytest.raises(ProviderError) as exc_info:
             await provider.generate(
                 prompt="A red dragon",
                 model="flux-2-pro",
@@ -58,10 +58,8 @@ async def test_fal_provider_generate_timeout():
                 size=(1024, 1024),
             )
 
-        # Verify it's a retryable error with timeout code
-        assert exc_info.value.error_code == ErrorCode.PROVIDER_TIMEOUT
-        # Message should mention timeout (message says "timed out")
-        assert exc_info.value.message and ("timeout" in exc_info.value.message.lower() or "timed out" in exc_info.value.message.lower())
+        assert exc_info.value.failure.code is FailureCode.PROVIDER_TIMEOUT
+        assert "timed out" in str(exc_info.value).lower()
 
 
 @pytest.mark.asyncio

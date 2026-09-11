@@ -80,6 +80,7 @@ def test_inference_observation_fields_are_specified() -> None:
         "resolved_model",
         "response_model",
         "provider_request_id",
+        "provider_response_id",
         "input_tokens",
         "cached_input_tokens",
         "output_tokens",
@@ -143,7 +144,8 @@ def test_built_wheel_imports_without_provider_extras(tmp_path: Path) -> None:
             "-c",
             "import generationengine as ge; "
             "assert ge.InferenceObservation; "
-            "assert 'TextGenerationService' in ge.__all__",
+            "assert 'GenerationClient' in ge.__all__; "
+            "assert 'TextGenerationService' not in ge.__all__",
         ],
         check=True,
         capture_output=True,

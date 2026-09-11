@@ -2,45 +2,18 @@
 
 ## E2A — Characterize and define the contract (merged)
 
-See `docs/CORE-CONTRACT.md` and `docs/CURRENT-STATE.md`.
+See `docs/CORE-CONTRACT.md`.
 
-## E2B — Trustworthy core primitives (this PR)
+## E2B — Trustworthy core primitives
 
-Landed: clean install/CI, `InferenceObservation`, `FailureCode`, catalog/profiles, `TextProvider`/`ImageProvider` (including `TextCompleted`/`TextFailed` stream terminals), prompt-free legacy metrics, dead-API removal, `openai` as optional extra with provider-free wheel import proof.
+Catalog, observations, failure taxonomy, provider protocols, packaging/CI.
 
-Active DungeonMindServer imports were not migrated. That is sequencing, not a compatibility promise.
+## E2 — Coordinated flag-day cutover (this PR)
 
-## Next — Coordinated flag-day cutover
+`GenerationClient` is the live execution surface. OpenAI and Fal run behind adapters. Image results are bytes. Legacy facades are deleted.
 
-One controlled GenerationEngine + DungeonMindServer change:
+Paired DungeonMindServer work migrates every inventoried consumer in the same cutover unit.
 
-```text
-GenerationEngine
-  move OpenAI behind TextProvider
-  provider-neutral text / structured generation
-  transport-neutral streaming (delete SSE core surface)
-  truthful InferenceObservation population
-  artifact-free image generation/editing
-  truthful Fal/OpenAI wiring
-  remove Cloudflare persistence from inference core
+## After cutover — Settling Gate G
 
-DungeonMindServer
-  migrate every GE consumer
-  own action -> generic profile mapping
-  own Cloudflare / durable artifact persistence
-  migrate appropriate direct provider calls
-
-then immediately
-  delete old GE facades
-  delete legacy metrics/errors/responses
-  delete stale TextModel/MODEL_PRICING
-  delete UploadService from inference core
-```
-
-The running deployed instance is untouched until that development state is proven and deliberately deployed.
-
-There is no E3 compatibility period for the old GenerationEngine contract.
-
-## After cutover — settling
-
-Clean-install matrices, fake-provider contract proofs, DungeonMindServer integration, documentation truth, Gate G.
+Clean-install matrices, fake-provider contract proofs, DungeonMindServer integration, documentation truth. Gate G is not part of this PR.
