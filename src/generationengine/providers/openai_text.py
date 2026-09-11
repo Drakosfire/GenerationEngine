@@ -24,9 +24,9 @@ try:
     from openai import APIError, APITimeoutError, AsyncOpenAI, RateLimitError
 except ImportError:
     AsyncOpenAI = None  # type: ignore
-    RateLimitError = Exception  # type: ignore
-    APITimeoutError = Exception  # type: ignore
-    APIError = Exception  # type: ignore
+    RateLimitError = None  # type: ignore
+    APITimeoutError = None  # type: ignore
+    APIError = None  # type: ignore
 
 
 def _require_openai() -> None:
@@ -185,18 +185,22 @@ class OpenAITextProvider:
         message = str(exc) or name
         request_id = _request_id_from_exception(exc)
         kwargs = {"provider_request_id": request_id}
-        if isinstance(exc, RateLimitError) or "RateLimit" in name:
+        if _is_sdk_exception(exc, RateLimitError) or "RateLimit" in name:
             return ProviderError.from_code(FailureCode.RATE_LIMITED, message, **kwargs)
-        if isinstance(exc, APITimeoutError) or "Timeout" in name:
+        if _is_sdk_exception(exc, APITimeoutError) or "Timeout" in name:
             return ProviderError.from_code(FailureCode.PROVIDER_TIMEOUT, message, **kwargs)
         status = getattr(exc, "status_code", None)
         if status == 429:
             return ProviderError.from_code(FailureCode.RATE_LIMITED, message, **kwargs)
         if isinstance(status, int) and status >= 500:
             return ProviderError.from_code(FailureCode.PROVIDER_UNAVAILABLE, message, **kwargs)
-        if isinstance(exc, APIError):
+        if _is_sdk_exception(exc, APIError):
             return ProviderError.from_code(FailureCode.PROVIDER_ERROR, message, **kwargs)
         return ProviderError.from_code(FailureCode.PROVIDER_ERROR, message, **kwargs)
+
+
+def _is_sdk_exception(exc: Exception, sdk_type: type[Exception] | None) -> bool:
+    return sdk_type is not None and isinstance(exc, sdk_type)
 
 
 def _empty_failed_observation(code: FailureCode) -> InferenceObservation:
