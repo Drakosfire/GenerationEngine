@@ -376,9 +376,12 @@ Do not create separate provider packages in E2 unless the extras model proves in
 
 ## 11. Cutover policy
 
-E2B does not replace current DungeonMindServer imports because that product is not in this PR.
+E2B intentionally did not replace DungeonMindServer imports because that
+product was outside the foundation slice.
 
-The next slice moves GenerationEngine and DungeonMindServer together, then deletes obsolete GE surfaces immediately. See [COMPATIBILITY.md](COMPATIBILITY.md).
+The coordinated E2 cutover uses this contract for GenerationEngine and its
+DungeonMindServer consumers. Obsolete GenerationEngine surfaces are deleted,
+not retained as compatibility paths. See [COMPATIBILITY.md](COMPATIBILITY.md).
 
 Do not add deprecation frameworks, dual APIs, or SSE/URL adapters to stretch old surfaces past that cutover.
 

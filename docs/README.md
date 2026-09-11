@@ -1,11 +1,14 @@
 # GenerationEngine documentation
 
-**Status:** E2B foundation. Core primitives exist. Live OpenAI/Fal execution and Cloudflare image upload are still the pre-cutover implementation.
+**Status:** The GenerationEngine half of the E2 cutover is implemented.
+`GenerationClient` owns live OpenAI/Fal execution, images return bytes, and
+product publication is outside the inference core. Ecosystem acceptance still
+requires the paired consumer merge and Settling Gate G.
 
 | Document | Purpose |
 | --- | --- |
-| [CURRENT-STATE.md](CURRENT-STATE.md) | What the package claims vs what execution still does |
-| [CORE-CONTRACT.md](CORE-CONTRACT.md) | Target product-neutral inference contract |
+| [CURRENT-STATE.md](CURRENT-STATE.md) | Implemented package surface and execution behavior |
+| [CORE-CONTRACT.md](CORE-CONTRACT.md) | Implemented product-neutral inference contract |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | Consumer inventory for the flag-day cutover, not an API-support promise |
 | [E2-SUCCESSOR-SLICES.md](E2-SUCCESSOR-SLICES.md) | E2B vs coordinated cutover |
 

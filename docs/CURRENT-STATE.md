@@ -1,7 +1,7 @@
 # GenerationEngine current state
 
 **Branch:** `feat/e2-provider-neutral-cutover`  
-**Target contract:** [CORE-CONTRACT.md](CORE-CONTRACT.md)  
+**Contract:** [CORE-CONTRACT.md](CORE-CONTRACT.md)
 **Consumer inventory:** [COMPATIBILITY.md](COMPATIBILITY.md)
 
 ```text
