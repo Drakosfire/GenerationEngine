@@ -43,12 +43,9 @@ def test_request_id_is_http_id_not_response_object_id() -> None:
     assert result.provider_response_id == "resp_abc"
 
 
-def test_openai_maps_sdk_errors_to_safe_public_messages(monkeypatch) -> None:
+def test_openai_maps_sdk_errors_to_safe_public_messages() -> None:
     from generationengine.failures import FailureCode
 
-    monkeypatch.setattr("generationengine.providers.openai_text.RateLimitError", None)
-    monkeypatch.setattr("generationengine.providers.openai_text.APITimeoutError", None)
-    monkeypatch.setattr("generationengine.providers.openai_text.APIError", None)
     provider = OpenAITextProvider(client=SimpleNamespace())
     error = provider._map_exception(
         RuntimeError("Authorization Bearer sk-live HTTP 502 from api.openai.com")

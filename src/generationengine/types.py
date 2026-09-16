@@ -24,6 +24,7 @@ class TextRequest(BaseModel):
     user_prompt: str
     system_prompt: str | None = None
     profile: InferenceProfile | None = None
+    provider: str | None = None
     model: str | None = None
     temperature: float = 0.7
     json_schema: dict[str, Any] | None = None

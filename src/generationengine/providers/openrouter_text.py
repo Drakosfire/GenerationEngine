@@ -1,4 +1,4 @@
-"""OpenAI text/structured/stream adapter. SDK types stay inside this module."""
+"""OpenRouter text adapter. Provider identity is openrouter, not openai."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import os
 from collections.abc import AsyncIterator
 from typing import Any
 
-from generationengine.failures import FailureCode, InferenceFailure
+from generationengine.failures import FailureCode
 from generationengine.observation import InferenceObservation, ObservationState
 from generationengine.providers.base import (
     TextCompleted,
@@ -25,25 +25,32 @@ from generationengine.providers.openai_compatible import (
 )
 from generationengine.utils.schema_utils import make_schema_strict
 
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+PROVIDER_ID = "openrouter"
 
-class OpenAITextProvider:
+
+class OpenRouterTextProvider:
     def __init__(self, client: Any | None = None, api_key: str | None = None) -> None:
         if client is not None:
             self._client = client
             return
-        require_openai_sdk(extra_name="openai", client_cls=AsyncOpenAI)
-        key = api_key or os.getenv("OPENAI_API_KEY")
+        require_openai_sdk(extra_name="openrouter", client_cls=AsyncOpenAI)
+        key = api_key or os.getenv("OPENROUTER_API_KEY")
         if not key:
             raise ProviderError.from_code(
                 FailureCode.CONFIGURATION_UNAVAILABLE,
-                "OPENAI_API_KEY is required for text generation.",
+                "OPENROUTER_API_KEY is required for OpenRouter text generation.",
             )
-        self._client = AsyncOpenAI(api_key=key, max_retries=0)
+        self._client = AsyncOpenAI(
+            api_key=key,
+            base_url=OPENROUTER_BASE_URL,
+            max_retries=0,
+        )
 
     async def generate(self, call: TextGenerationCall) -> TextGenerationResult:
         kwargs = self._request_kwargs(call)
         try:
-            response = await self._client.responses.create(**kwargs)
+            response = await self._client.chat.completions.create(**kwargs)
         except Exception as exc:
             raise self._map_exception(exc) from exc
         return self._result_from_response(response, structured=call.json_schema is not None)
@@ -51,50 +58,36 @@ class OpenAITextProvider:
     async def stream(self, call: TextGenerationCall) -> AsyncIterator[TextStreamEvent]:
         kwargs = self._request_kwargs(call, streaming=True)
         pieces: list[str] = []
+        usage = None
+        request_id = None
+        response_id = None
+        response_model = None
         try:
-            stream_manager = self._client.responses.stream(**kwargs)
-            async with stream_manager as response_stream:
-                async for event in response_stream:
-                    event_type = getattr(event, "type", None)
-                    if event_type == "response.output_text.delta":
-                        content = getattr(event, "delta", "") or ""
-                        if content:
-                            pieces.append(content)
-                            yield TextDelta(text=content)
-                    elif event_type == "response.error":
-                        message = getattr(
-                            getattr(event, "error", None),
-                            "message",
-                            "OpenAI stream error",
-                        )
-                        failure = InferenceFailure.from_code(
-                            FailureCode.PROVIDER_ERROR,
-                            message,
-                        )
-                        yield TextFailed(
-                            failure=failure,
-                            observation=_empty_failed_observation(failure.code),
-                        )
-                        return
-                    elif event_type == "response.completed":
-                        response = getattr(event, "response", None)
-                        result = (
-                            self._result_from_response(response, structured=False)
-                            if response is not None
-                            else TextGenerationResult(text="".join(pieces))
-                        )
-                        yield TextCompleted(
-                            final_text=result.text or "".join(pieces),
-                            observation=_completed_observation(result),
-                        )
-                        return
-            failure = InferenceFailure.from_code(
-                FailureCode.STREAM_INCOMPLETE,
-                "OpenAI stream ended without a terminal event.",
+            stream = await self._client.chat.completions.create(**kwargs)
+            async for chunk in stream:
+                request_id = getattr(chunk, "_request_id", None) or request_id
+                response_id = getattr(chunk, "id", None) or response_id
+                response_model = getattr(chunk, "model", None) or response_model
+                if getattr(chunk, "usage", None) is not None:
+                    usage = chunk.usage
+                choices = getattr(chunk, "choices", None) or []
+                if not choices:
+                    continue
+                delta = getattr(choices[0], "delta", None)
+                content = getattr(delta, "content", None) or ""
+                if content:
+                    pieces.append(content)
+                    yield TextDelta(text=content)
+            result = TextGenerationResult(
+                text="".join(pieces),
+                provider_request_id=request_id,
+                provider_response_id=response_id,
+                response_model=response_model,
+                **_usage_fields(usage),
             )
-            yield TextFailed(
-                failure=failure,
-                observation=_empty_failed_observation(failure.code),
+            yield TextCompleted(
+                final_text=result.text or "",
+                observation=_completed_observation(result),
             )
         except ProviderError as exc:
             yield TextFailed(
@@ -109,35 +102,42 @@ class OpenAITextProvider:
             )
 
     def _request_kwargs(self, call: TextGenerationCall, *, streaming: bool = False) -> dict[str, Any]:
+        messages: list[dict[str, str]] = []
+        if call.system_prompt:
+            messages.append({"role": "system", "content": call.system_prompt})
+        messages.append({"role": "user", "content": call.user_prompt})
         kwargs: dict[str, Any] = {
             "model": call.model,
-            "input": call.user_prompt,
+            "messages": messages,
             "temperature": call.temperature,
         }
-        if call.system_prompt:
-            kwargs["instructions"] = call.system_prompt
+        if streaming:
+            kwargs["stream"] = True
         if call.json_schema and not streaming:
-            kwargs["text"] = {
-                "format": {
-                    "type": "json_schema",
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
                     "name": call.schema_name or "structured_output",
                     "schema": make_schema_strict(call.json_schema),
                     "strict": True,
-                }
+                },
             }
         return kwargs
 
     def _result_from_response(self, response: Any, *, structured: bool) -> TextGenerationResult:
         request_id, response_id = _ids_from_response(response)
-        if getattr(response, "refusal", None):
+        choices = getattr(response, "choices", None) or []
+        message = getattr(choices[0], "message", None) if choices else None
+        refusal = getattr(message, "refusal", None) if message is not None else None
+        if refusal:
             raise ProviderError.from_code(
                 FailureCode.PROVIDER_REFUSED,
-                f"Generation refused: {response.refusal}",
+                f"Generation refused: {refusal}",
                 provider_request_id=request_id,
                 provider_response_id=response_id,
                 response_model=getattr(response, "model", None),
             )
-        text = getattr(response, "output_text", None)
+        text = getattr(message, "content", None) if message is not None else None
         usage = getattr(response, "usage", None)
         parsed = None
         if structured and text:
@@ -151,29 +151,38 @@ class OpenAITextProvider:
                     provider_response_id=response_id,
                     response_model=getattr(response, "model", None),
                 ) from exc
-        cached = None
-        if usage is not None:
-            input_details = getattr(usage, "input_tokens_details", None)
-            if input_details is not None:
-                cached = getattr(input_details, "cached_tokens", None)
         return TextGenerationResult(
             text=text,
             parsed=parsed,
             provider_request_id=request_id,
             provider_response_id=response_id,
             response_model=getattr(response, "model", None),
-            input_tokens=getattr(usage, "input_tokens", None) if usage else None,
-            cached_input_tokens=cached,
-            output_tokens=getattr(usage, "output_tokens", None) if usage else None,
+            **_usage_fields(usage),
         )
 
     def _map_exception(self, exc: Exception) -> ProviderError:
         return map_openai_compatible_exception(exc)
 
 
+def _usage_fields(usage: Any) -> dict[str, int | None]:
+    if usage is None:
+        return {
+            "input_tokens": None,
+            "cached_input_tokens": None,
+            "output_tokens": None,
+        }
+    details = getattr(usage, "prompt_tokens_details", None)
+    cached = getattr(details, "cached_tokens", None) if details is not None else None
+    return {
+        "input_tokens": getattr(usage, "prompt_tokens", None),
+        "cached_input_tokens": cached,
+        "output_tokens": getattr(usage, "completion_tokens", None),
+    }
+
+
 def _empty_failed_observation(code: FailureCode) -> InferenceObservation:
     return InferenceObservation(
-        provider="openai",
+        provider=PROVIDER_ID,
         latency_ms=0,
         retry_count=0,
         state=ObservationState.FAILED
@@ -185,7 +194,7 @@ def _empty_failed_observation(code: FailureCode) -> InferenceObservation:
 
 def _completed_observation(result: TextGenerationResult) -> InferenceObservation:
     return InferenceObservation(
-        provider="openai",
+        provider=PROVIDER_ID,
         response_model=result.response_model,
         provider_request_id=result.provider_request_id,
         provider_response_id=result.provider_response_id,

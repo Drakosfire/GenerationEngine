@@ -1,6 +1,6 @@
 # GenerationEngine current state
 
-**Branch:** `feat/e2-provider-neutral-cutover`  
+**Branch:** `e5/explicit-target-provider-dispatch`  
 **Contract:** [CORE-CONTRACT.md](CORE-CONTRACT.md)  
 **Structured-conformance refinement:** [STRUCTURED-CONFORMANCE.md](STRUCTURED-CONFORMANCE.md)  
 **Consumer inventory:** [COMPATIBILITY.md](COMPATIBILITY.md)
@@ -12,11 +12,13 @@ public API: GenerationClient
   stream_text
   generate_image
   edit_image
-live adapters: OpenAITextProvider, FalProvider
+text dispatch: openai, openrouter (by provider identity)
+live adapters: OpenAITextProvider, OpenRouterTextProvider, FalProvider
 observations: InferenceObservation on success and failure
 failures: FailureCode / GenerationEngineError (no SDK types)
 image results: bytes only; no Cloudflare, no URLs
-catalog: generic profiles + live catalog ids required by DungeonMindServer
+catalog: selection/metadata authority for profile defaults and governed model IDs
+explicit targets: provider + model may execute without a LIVE_MODELS row
 deleted: TextGenerationService, ImageService, UploadService, MetricsService,
          TextModel, ImageModel, MODEL_PRICING, generationengine.models,
          generationengine.services
@@ -24,11 +26,13 @@ deleted: TextGenerationService, ImageService, UploadService, MetricsService,
 
 Image publication, product prompts, schema definitions/domain meaning, and action→profile mapping belong to products.
 
+Labs should prefer GenerationEngine explicit targets when the experiment fits the generic contract. A bounded lab-only direct provider path remains allowed when GenerationEngine cannot yet express a required control; that path must not become a production seam.
+
 ## Structured generation status
 
-`generate_structured()` exists today, but `main` does **not yet** implement the full provider-independent structured-conformance contract adopted on 2026-09-16.
+`generate_structured()` exists today, but this tree does **not yet** implement the full provider-independent structured-conformance contract adopted on 2026-09-16.
 
-Current provider adapters still carry provider-native structured-output mechanics. The adopted target is broader:
+Current provider adapters still carry provider-native structured-output mechanics. The adopted target is [STRUCTURED-CONFORMANCE.md](STRUCTURED-CONFORMANCE.md):
 
 ```text
 caller supplies JSON Schema

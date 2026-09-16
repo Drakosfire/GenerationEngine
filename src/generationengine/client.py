@@ -44,8 +44,14 @@ class GenerationClient:
         *,
         text_provider: TextProvider | None = None,
         image_provider: ImageProvider | None = None,
+        text_providers: dict[str, TextProvider] | None = None,
     ) -> None:
-        self._text = text_provider
+        self._text_providers: dict[str, TextProvider] = {}
+        if text_providers:
+            for name, provider in text_providers.items():
+                self._text_providers[name.strip().lower()] = provider
+        if text_provider is not None:
+            self._text_providers.setdefault("openai", text_provider)
         self._image = image_provider
 
     @classmethod
@@ -53,15 +59,36 @@ class GenerationClient:
         """Construct providers from extras/env. Missing extras fail at first use."""
         return cls()
 
-    def _text_provider(self) -> TextProvider:
-        if self._text is None:
+    def _text_provider_for(self, provider_id: str) -> TextProvider:
+        key = provider_id.strip().lower()
+        cached = self._text_providers.get(key)
+        if cached is not None:
+            return cached
+        if key == "openai":
             from generationengine.providers.openai_text import OpenAITextProvider
 
             try:
-                self._text = OpenAITextProvider()
+                provider = OpenAITextProvider()
             except ProviderError as exc:
                 raise _config_error(exc.failure, provider="openai") from exc
-        return self._text
+            self._text_providers[key] = provider
+            return provider
+        if key == "openrouter":
+            from generationengine.providers.openrouter_text import OpenRouterTextProvider
+
+            try:
+                provider = OpenRouterTextProvider()
+            except ProviderError as exc:
+                raise _config_error(exc.failure, provider="openrouter") from exc
+            self._text_providers[key] = provider
+            return provider
+        raise _config_error(
+            InferenceFailure.from_code(
+                FailureCode.UNSUPPORTED_CAPABILITY,
+                f"Text provider {key!r} is not registered.",
+            ),
+            provider=key,
+        )
 
     def _image_provider(self) -> ImageProvider:
         if self._image is None:
@@ -102,6 +129,7 @@ class GenerationClient:
                 capability=Capability.STREAMING_TEXT,
                 profile=request.profile,
                 model=request.model,
+                provider=request.provider,
             )
         except ResolutionError as exc:
             yield _stream_failure(
@@ -115,7 +143,7 @@ class GenerationClient:
         terminal = False
         try:
             try:
-                provider = self._text_provider()
+                provider = self._text_provider_for(resolution.provider)
             except GenerationEngineError as exc:
                 yield _stream_failure(
                     failure=exc.failure,
@@ -125,7 +153,7 @@ class GenerationClient:
                     provider=exc.observation.provider,
                 )
                 return
-            call = _text_call(request, resolution.record.provider_model_id)
+            call = _text_call(request, resolution.provider_model_id)
             stream = provider.stream(call)
             iterator = stream.__aiter__()
             while True:
@@ -222,11 +250,12 @@ class GenerationClient:
                 capability=capability,
                 profile=request.profile,
                 model=request.model,
+                provider=request.provider,
             )
         except ResolutionError as exc:
             raise _config_error(exc.failure, request=request) from exc
-        provider = self._text_provider()
-        call = _text_call(request, resolution.record.provider_model_id)
+        provider = self._text_provider_for(resolution.provider)
+        call = _text_call(request, resolution.provider_model_id)
         try:
             result, retry_count = await _execute_with_retries(
                 started=started,
@@ -290,7 +319,7 @@ class GenerationClient:
             try:
                 return await provider.generate(
                     prompt=request.prompt,
-                    model=resolution.record.provider_model_id,
+                    model=resolution.provider_model_id,
                     num_images=request.num_images,
                     size=(request.width, request.height),
                     image_url=request.source_image_url,
@@ -325,10 +354,10 @@ class GenerationClient:
                 ),
             ) from exc
         observation = InferenceObservation(
-            provider=resolution.record.provider,
+            provider=resolution.provider,
             requested_profile=request.profile.value if request.profile else None,
             requested_model=request.model,
-            resolved_model=resolution.catalog_id,
+            resolved_model=resolution.resolved_model,
             latency_ms=_elapsed_ms(started),
             retry_count=retry_count,
             state=ObservationState.COMPLETED,
@@ -529,10 +558,10 @@ def _completed_observation_from_stream(
     latency_ms: int,
 ) -> InferenceObservation:
     return InferenceObservation(
-        provider=resolution.record.provider,
+        provider=resolution.provider,
         requested_profile=request.profile.value if request.profile else None,
         requested_model=request.model,
-        resolved_model=resolution.catalog_id,
+        resolved_model=resolution.resolved_model,
         response_model=provider_obs.response_model,
         provider_request_id=provider_obs.provider_request_id,
         provider_response_id=provider_obs.provider_response_id,
@@ -543,7 +572,7 @@ def _completed_observation_from_stream(
         latency_ms=latency_ms,
         retry_count=0,
         state=ObservationState.COMPLETED,
-        pricing_source=resolution.record.pricing_source,
+        pricing_source=resolution.pricing_source,
     )
 
 
@@ -556,10 +585,10 @@ def _completed_observation(
     retry_count: int,
 ) -> InferenceObservation:
     return InferenceObservation(
-        provider=resolution.record.provider,
+        provider=resolution.provider,
         requested_profile=request.profile.value if request.profile else None,
         requested_model=request.model,
-        resolved_model=resolution.catalog_id,
+        resolved_model=resolution.resolved_model,
         response_model=result.response_model,
         provider_request_id=result.provider_request_id,
         provider_response_id=getattr(result, "provider_response_id", None),
@@ -570,7 +599,7 @@ def _completed_observation(
         latency_ms=latency_ms,
         retry_count=retry_count,
         state=ObservationState.COMPLETED,
-        pricing_source=resolution.record.pricing_source,
+        pricing_source=resolution.pricing_source,
     )
 
 
@@ -609,10 +638,10 @@ def _failed_observation(
     }:
         state = ObservationState.INCOMPLETE
     return InferenceObservation(
-        provider=provider or (resolution.record.provider if resolution else None),
+        provider=provider or (resolution.provider if resolution else None),
         requested_profile=profile,
         requested_model=model,
-        resolved_model=resolution.catalog_id if resolution else None,
+        resolved_model=resolution.resolved_model if resolution else None,
         response_model=response_model or (result.response_model if result else None),
         provider_request_id=provider_request_id
         or (result.provider_request_id if result else None),
@@ -627,7 +656,7 @@ def _failed_observation(
         retry_count=retry_count,
         state=state,
         failure_code=failure.code,
-        pricing_source=resolution.record.pricing_source if resolution else None,
+        pricing_source=resolution.pricing_source if resolution else None,
     )
 
 

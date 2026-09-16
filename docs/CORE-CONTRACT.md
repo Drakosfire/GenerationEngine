@@ -1,6 +1,6 @@
 # GenerationEngine core contract (target)
 
-**Status:** Coordinated cutover implemented. Live execution is `GenerationClient` over OpenAI and Fal adapters.  
+**Status:** Coordinated cutover implemented. Live execution is `GenerationClient` over OpenAI, OpenRouter, and Fal adapters.  
 **Current behavior:** [CURRENT-STATE.md](CURRENT-STATE.md)  
 **Cutover inventory:** [COMPATIBILITY.md](COMPATIBILITY.md)
 
@@ -79,11 +79,14 @@ ImageProvider
 
 After the provider reset:
 
-- the core/service layer must not instantiate OpenAI or Fal SDK clients
+- the core/service layer must not instantiate OpenAI, OpenRouter, or Fal SDK clients
 - provider SDK exception types must not be the public contract
 - advertised providers must match registered wiring and declared extras
+- provider identity is the dispatch/observation name (`openai`, `openrouter`, `fal`); it is not the SDK used internally
 
-`ImageProvider` already exists as a protocol. E2B adds `TextProvider`. The coordinated cutover moves live OpenAI/Fal execution behind these seams.
+OpenRouter remains `provider=openrouter` even when the adapter reuses an OpenAI-compatible Python SDK or request shape.
+
+`ImageProvider` already exists as a protocol. E2B adds `TextProvider`. The coordinated cutover moves live OpenAI/Fal execution behind these seams. E5B adds OpenRouter as a registered text provider and dispatches text calls by provider identity.
 
 ---
 
@@ -95,6 +98,15 @@ product action                 # owned by the consumer
 generic inference profile      # GenerationEngine vocabulary
         ↓
 provider + model resolution    # GenerationEngine-owned
+```
+
+There are two intentional execution lanes:
+
+```text
+governed resolution            explicit target
+profile / catalog              provider + model
+GE chooses a known target      caller chooses target
+catalog is required            catalog entry is not
 ```
 
 <!-- ACCEPTED_PROFILES -->
@@ -120,19 +132,34 @@ card_generation
 character_generation
 ```
 
-Explicit provider/model selection remains allowed for tests and for compatibility facades. Precedence:
+Resolution precedence:
 
-1. explicit provider + model (test/compatibility override)
-2. generic profile resolution through the catalog
-3. no implicit product-policy fallback inside GenerationEngine
+```text
+1. explicit provider + explicit model
+   → caller-selected target; no model-catalog membership required
+2. explicit model without provider
+   → strict catalog model resolution
+3. profile without explicit target
+   → catalog/profile resolution
+4. provider without model
+   → INVALID_REQUEST
+5. neither profile nor model
+   → INVALID_REQUEST
+```
 
-Products keep their own action → profile maps.
+If GenerationEngine chooses the model, the model must be cataloged. If the caller explicitly chooses both provider and model, the provider must be registered and the model catalog entry is not required.
+
+Do not silently interpret an unknown model string as an OpenAI model merely because the OpenAI SDK is installed. A profile, when supplied with an explicit provider+model target, is observation/intent metadata and must not override that target.
+
+Products keep their own action → profile maps. Labs should prefer GenerationEngine explicit targets when the experiment fits this contract. When a lab needs provider-specific controls GenerationEngine cannot yet express, a bounded lab-only direct provider path is allowed; that path must not become a production seam.
 
 ---
 
 ## 4. Model / catalog authority
 
 One GenerationEngine-owned catalog is the source for reusable model metadata. Product repositories must not copy pricing or capability tables.
+
+The catalog is selection and metadata authority: models GenerationEngine may choose automatically through generic profiles, or describe authoritatively. It is **not** an execution allowlist. Explicit provider+model targets may execute through a registered provider without a catalog row. Unknown pricing and capability metadata for uncataloged targets remain unknown; they are not invented as zero.
 
 Minimal catalog record:
 
@@ -360,13 +387,16 @@ A Fal image consumer must fail with `CONFIGURATION_UNAVAILABLE` / `UNSUPPORTED_C
 Recommended packaging:
 
 ```text
-core:         pydantic, httpx, tenacity
-openai extra: openai
-fal extra:    fal-client
-dev group:    pytest, pytest-asyncio, ruff
+core:             pydantic, httpx, tenacity
+openai extra:     openai
+openrouter extra: openai   # OpenAI-compatible SDK; provider identity remains openrouter
+fal extra:        fal-client
+dev group:        pytest, pytest-asyncio, ruff
 ```
 
-`GenerationClient.from_env()` lazy-loads OpenAI and Fal adapters on first use so a core-only wheel import does not require provider extras. CI proves that boundary with an isolated built-wheel import step.
+`GenerationClient.from_env()` lazy-loads OpenAI, OpenRouter, and Fal adapters on first use so a core-only wheel import does not require provider extras. CI proves that boundary with an isolated built-wheel import step.
+
+Text through OpenAI requires `OPENAI_API_KEY`. Text through OpenRouter requires `OPENROUTER_API_KEY`. Images require `FAL_KEY`.
 
 Cloudflare is not a GenerationEngine inference dependency.
 

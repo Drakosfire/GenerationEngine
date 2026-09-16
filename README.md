@@ -14,10 +14,10 @@ GenerationEngine owns inference execution and inference-call truth. Products own
 ## Installation
 
 ```bash
-pip install "generationengine[openai,fal] @ git+https://github.com/Drakosfire/GenerationEngine.git"
+pip install "generationengine[openai,openrouter,fal] @ git+https://github.com/Drakosfire/GenerationEngine.git"
 ```
 
-Text requires `OPENAI_API_KEY`. Images require `FAL_KEY`. Cloudflare credentials are not used here.
+Text through OpenAI requires `OPENAI_API_KEY`. Text through OpenRouter requires `OPENROUTER_API_KEY`. Images require `FAL_KEY`. Cloudflare credentials are not used here.
 
 ## Quick start
 
@@ -32,6 +32,20 @@ result = await client.generate_text(
     )
 )
 print(result.text)
+print(result.observation.resolved_model)
+```
+
+Explicit provider+model targets do not require a catalog row. The named provider must be registered:
+
+```python
+result = await client.generate_text(
+    TextRequest(
+        user_prompt="Summarize this scene",
+        provider="openrouter",
+        model="deepseek/deepseek-v4.1-flash",
+    )
+)
+print(result.observation.provider)
 print(result.observation.resolved_model)
 ```
 
@@ -68,5 +82,6 @@ png_bytes = images.images[0].content
 
 ```bash
 OPENAI_API_KEY=your_openai_key
+OPENROUTER_API_KEY=your_openrouter_key
 FAL_KEY=your_fal_key
 ```
