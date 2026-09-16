@@ -8,6 +8,7 @@ GenerationEngine owns inference execution and inference-call truth. Products own
 | --- | --- |
 | [docs/CURRENT-STATE.md](docs/CURRENT-STATE.md) | Implemented public surface |
 | [docs/CORE-CONTRACT.md](docs/CORE-CONTRACT.md) | Capabilities, profiles, observations, failures |
+| [docs/STRUCTURED-CONFORMANCE.md](docs/STRUCTURED-CONFORMANCE.md) | Adopted structured-generation refinement |
 | [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) | Deleted vs current API |
 | [docs/E2-SUCCESSOR-SLICES.md](docs/E2-SUCCESSOR-SLICES.md) | E2 sequence |
 
@@ -62,6 +63,8 @@ result = await client.generate_structured(
 )
 print(result.parsed)
 ```
+
+`generate_structured()` currently uses the OpenAI adapter's native schema path for OpenAI calls. That is a provider-specific optimization, not the structured contract; see [docs/STRUCTURED-CONFORMANCE.md](docs/STRUCTURED-CONFORMANCE.md). OpenRouter is text and stream only in this slice; `generate_structured()` through OpenRouter fails closed until that conformance layer exists. Labs should keep a bounded direct OpenRouter path for structured experiments until then.
 
 Image generation returns bytes. Products publish artifacts:
 

@@ -336,13 +336,20 @@ E2A found no DungeonMindServer caller of legacy `generate_stream`. The coordinat
 
 ## 8. Structured output
 
-- Products own Pydantic/domain schemas (`MapSpec`, card item schemas, and so on).
-- GenerationEngine owns provider mechanics: JSON Schema submission, strict-mode adaptation, reporting parse/refusal outcomes.
+[STRUCTURED-CONFORMANCE.md](STRUCTURED-CONFORMANCE.md) is the adopted refinement of this section. Provider-native strict-schema features are implementation strategies, not the semantic definition of `generate_structured()`.
+
+- Products own Pydantic/domain schemas and their domain meaning (`MapSpec`, card item schemas, and so on).
+- GenerationEngine owns structural conformance of inference output to the caller-supplied schema once that layer is implemented.
 - The engine accepts **JSON Schema** (current) and may later accept a Pydantic type as a convenience that is immediately reduced to JSON Schema. The public contract must not require importing product models.
-- Schema normalization (`additionalProperties`, required fields, `$ref` cleaning) lives in GenerationEngine.
 - Refusal uses `PROVIDER_REFUSED`. Parse/schema mismatch uses `STRUCTURED_OUTPUT_INVALID`.
 - Result shape: text content, optional parsed object, observation, optional failure. Parsed data is not a product domain type inside the engine.
 - Tests use a domain-neutral schema (for example a `{name: str, count: int}` fixture), never MapSpec/statblock/card models.
+
+Current E5B implementation, until [STRUCTURED-CONFORMANCE.md](STRUCTURED-CONFORMANCE.md) is implemented:
+
+- OpenAI may submit provider-native JSON Schema as a provider-specific optimization. That is not the definition of structured generation.
+- OpenRouter does **not** send `response_format=json_schema`. `generate_structured()` through OpenRouter fails closed with `UNSUPPORTED_CAPABILITY`.
+- Labs that need OpenRouter structured output stay on a bounded direct provider path until the conformance layer exists.
 
 ---
 

@@ -13,6 +13,9 @@ public API: GenerationClient
   generate_image
   edit_image
 text dispatch: openai, openrouter (by provider identity)
+openrouter: generate_text + stream_text only
+generate_structured via OpenRouter: UNSUPPORTED_CAPABILITY
+  (provider-native json_schema is not the structured contract)
 live adapters: OpenAITextProvider, OpenRouterTextProvider, FalProvider
 observations: InferenceObservation on success and failure
 failures: FailureCode / GenerationEngineError (no SDK types)
@@ -30,9 +33,11 @@ Labs should prefer GenerationEngine explicit targets when the experiment fits th
 
 ## Structured generation status
 
-`generate_structured()` exists today, but this tree does **not yet** implement the full provider-independent structured-conformance contract adopted on 2026-09-16.
+`generate_structured()` exists today, but this tree does **not yet** implement the full provider-independent structured-conformance contract adopted on 2026-09-16. See [STRUCTURED-CONFORMANCE.md](STRUCTURED-CONFORMANCE.md).
 
-Current provider adapters still carry provider-native structured-output mechanics. The adopted target is [STRUCTURED-CONFORMANCE.md](STRUCTURED-CONFORMANCE.md):
+OpenAI may still submit provider-native JSON Schema as a provider-specific optimization. OpenRouter does not: `generate_structured()` through OpenRouter fails closed with `UNSUPPORTED_CAPABILITY` and does not send `response_format=json_schema`. Labs that need OpenRouter/`json_object` plus local validation should keep that direct path until the conformance layer exists.
+
+The adopted target is broader than any provider-native schema feature:
 
 ```text
 caller supplies JSON Schema

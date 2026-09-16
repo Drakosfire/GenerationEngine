@@ -1,8 +1,13 @@
-"""OpenRouter text adapter. Provider identity is openrouter, not openai."""
+"""OpenRouter text adapter. Provider identity is openrouter, not openai.
+
+Ordinary text and streaming are in scope. This adapter does not implement
+GenerationEngine structured generation: provider-native `json_schema` is not
+the structured contract. That belongs to a provider-independent conformance
+layer in a successor slice.
+"""
 
 from __future__ import annotations
 
-import json
 import os
 from collections.abc import AsyncIterator
 from typing import Any
@@ -23,10 +28,13 @@ from generationengine.providers.openai_compatible import (
     map_openai_compatible_exception,
     require_openai_sdk,
 )
-from generationengine.utils.schema_utils import make_schema_strict
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 PROVIDER_ID = "openrouter"
+STRUCTURED_NOT_IMPLEMENTED = (
+    "GenerationEngine structured generation is not implemented for OpenRouter in this slice. "
+    "Provider-native json_schema is not the structured contract."
+)
 
 
 class OpenRouterTextProvider:
@@ -48,21 +56,23 @@ class OpenRouterTextProvider:
         )
 
     async def generate(self, call: TextGenerationCall) -> TextGenerationResult:
+        _reject_structured_call(call)
         kwargs = self._request_kwargs(call)
         try:
             response = await self._client.chat.completions.create(**kwargs)
         except Exception as exc:
             raise self._map_exception(exc) from exc
-        return self._result_from_response(response, structured=call.json_schema is not None)
+        return self._result_from_response(response)
 
     async def stream(self, call: TextGenerationCall) -> AsyncIterator[TextStreamEvent]:
-        kwargs = self._request_kwargs(call, streaming=True)
         pieces: list[str] = []
         usage = None
         request_id = None
         response_id = None
         response_model = None
         try:
+            _reject_structured_call(call)
+            kwargs = self._request_kwargs(call, streaming=True)
             stream = await self._client.chat.completions.create(**kwargs)
             async for chunk in stream:
                 request_id = getattr(chunk, "_request_id", None) or request_id
@@ -113,18 +123,9 @@ class OpenRouterTextProvider:
         }
         if streaming:
             kwargs["stream"] = True
-        if call.json_schema and not streaming:
-            kwargs["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": call.schema_name or "structured_output",
-                    "schema": make_schema_strict(call.json_schema),
-                    "strict": True,
-                },
-            }
         return kwargs
 
-    def _result_from_response(self, response: Any, *, structured: bool) -> TextGenerationResult:
+    def _result_from_response(self, response: Any) -> TextGenerationResult:
         request_id, response_id = _ids_from_response(response)
         choices = getattr(response, "choices", None) or []
         message = getattr(choices[0], "message", None) if choices else None
@@ -139,21 +140,9 @@ class OpenRouterTextProvider:
             )
         text = getattr(message, "content", None) if message is not None else None
         usage = getattr(response, "usage", None)
-        parsed = None
-        if structured and text:
-            try:
-                parsed = json.loads(text)
-            except json.JSONDecodeError as exc:
-                raise ProviderError.from_code(
-                    FailureCode.STRUCTURED_OUTPUT_INVALID,
-                    f"Structured output was not valid JSON: {exc}",
-                    provider_request_id=request_id,
-                    provider_response_id=response_id,
-                    response_model=getattr(response, "model", None),
-                ) from exc
         return TextGenerationResult(
             text=text,
-            parsed=parsed,
+            parsed=None,
             provider_request_id=request_id,
             provider_response_id=response_id,
             response_model=getattr(response, "model", None),
@@ -162,6 +151,15 @@ class OpenRouterTextProvider:
 
     def _map_exception(self, exc: Exception) -> ProviderError:
         return map_openai_compatible_exception(exc)
+
+
+def _reject_structured_call(call: TextGenerationCall) -> None:
+    if call.json_schema is None:
+        return
+    raise ProviderError.from_code(
+        FailureCode.UNSUPPORTED_CAPABILITY,
+        STRUCTURED_NOT_IMPLEMENTED,
+    )
 
 
 def _usage_fields(usage: Any) -> dict[str, int | None]:

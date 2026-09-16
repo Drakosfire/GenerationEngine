@@ -126,26 +126,71 @@ async def test_openrouter_text_request_uses_chat_completions() -> None:
 
 
 @pytest.mark.asyncio
-async def test_openrouter_structured_json_schema() -> None:
-    completions = _FakeCompletions(response=_chat_response(text='{"name":"x","count":1}'))
+async def test_openrouter_text_request_omits_response_format() -> None:
+    completions = _FakeCompletions()
     provider = _provider_with_completions(completions)
-    result = await provider.generate(
+    await provider.generate(
         TextGenerationCall(
             model="deepseek/deepseek-v4.1-flash",
             user_prompt="hello",
-            json_schema={
-                "type": "object",
-                "properties": {"name": {"type": "string"}, "count": {"type": "integer"}},
-                "required": ["name", "count"],
-            },
-            schema_name="fixture",
         )
     )
-    fmt = completions.calls[0]["response_format"]
-    assert fmt["type"] == "json_schema"
-    assert fmt["json_schema"]["name"] == "fixture"
-    assert fmt["json_schema"]["strict"] is True
-    assert result.parsed == {"name": "x", "count": 1}
+    assert "response_format" not in completions.calls[0]
+
+
+@pytest.mark.asyncio
+async def test_openrouter_structured_json_schema_is_not_implemented() -> None:
+    completions = _FakeCompletions()
+    provider = _provider_with_completions(completions)
+    call = TextGenerationCall(
+        model="deepseek/deepseek-v4.1-flash",
+        user_prompt="hello",
+        json_schema={
+            "type": "object",
+            "properties": {"name": {"type": "string"}, "count": {"type": "integer"}},
+            "required": ["name", "count"],
+        },
+        schema_name="fixture",
+    )
+    with pytest.raises(ProviderError) as exc:
+        await provider.generate(call)
+    assert exc.value.failure.code is FailureCode.UNSUPPORTED_CAPABILITY
+    assert "json_schema is not the structured contract" in exc.value.failure.message
+    assert completions.calls == []
+
+    events = [event async for event in provider.stream(call)]
+    assert len(events) == 1
+    assert isinstance(events[0], TextFailed)
+    assert events[0].failure.code is FailureCode.UNSUPPORTED_CAPABILITY
+    assert events[0].observation.provider == "openrouter"
+    assert completions.calls == []
+
+
+@pytest.mark.asyncio
+async def test_client_openrouter_generate_structured_fails_before_provider_call() -> None:
+    from generationengine import GenerationClient, GenerationEngineError, TextRequest
+
+    completions = _FakeCompletions()
+    client = GenerationClient(
+        text_providers={"openrouter": _provider_with_completions(completions)}
+    )
+    with pytest.raises(GenerationEngineError) as exc:
+        await client.generate_structured(
+            TextRequest(
+                user_prompt="hello",
+                provider="openrouter",
+                model="deepseek/deepseek-v4.1-flash",
+                json_schema={
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                    "required": ["name"],
+                },
+            )
+        )
+    assert exc.value.failure.code is FailureCode.UNSUPPORTED_CAPABILITY
+    assert "json_schema is not the structured contract" in exc.value.failure.message
+    assert exc.value.observation.provider == "openrouter"
+    assert completions.calls == []
 
 
 @pytest.mark.asyncio
