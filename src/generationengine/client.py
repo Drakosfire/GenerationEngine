@@ -123,8 +123,21 @@ class GenerationClient:
                 InferenceFailure.from_code(
                     FailureCode.INVALID_REQUEST,
                     "generate_structured requires json_schema.",
-                )
+                ),
+                request=request,
+                provider_attempt_count=0,
             )
+        try:
+            check_schema(request.json_schema)
+        except ConformanceError as exc:
+            raise _config_error(
+                InferenceFailure.from_code(
+                    FailureCode.INVALID_REQUEST,
+                    "generate_structured requires a valid JSON Schema object.",
+                ),
+                request=request,
+                provider_attempt_count=0,
+            ) from exc
         return await self._generate_structured(request)
 
     async def stream_text(self, request: TextRequest) -> AsyncIterator[TextStreamEvent]:
@@ -322,16 +335,6 @@ class GenerationClient:
         provider = self._text_provider_for(resolution.provider)
         schema = request.json_schema
         assert schema is not None
-        try:
-            check_schema(schema)
-        except ConformanceError as exc:
-            raise _config_error(
-                InferenceFailure.from_code(
-                    FailureCode.INVALID_REQUEST,
-                    "generate_structured requires a valid JSON Schema object.",
-                ),
-                request=request,
-            ) from exc
 
         usage_results: list = []
         transport_retries = 0
@@ -713,6 +716,7 @@ def _config_error(
     provider: str | None = None,
     request: TextRequest | None = None,
     image: ImageRequest | None = None,
+    provider_attempt_count: int | None = None,
 ) -> GenerationEngineError:
     return GenerationEngineError(
         failure,
@@ -723,6 +727,7 @@ def _config_error(
             provider=provider,
             latency_ms=0,
             retry_count=0,
+            provider_attempt_count=provider_attempt_count,
         ),
     )
 
