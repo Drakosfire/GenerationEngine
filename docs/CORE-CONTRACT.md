@@ -353,7 +353,7 @@ E2A found no DungeonMindServer caller of legacy `generate_stream`. The coordinat
 Current E5B.1 implementation:
 
 - `generate_structured()` always performs GenerationEngine-owned local JSON Schema validation before success.
-- OpenAI may submit provider-native JSON Schema as a provider-specific optimization, then GE still validates locally.
+- OpenAI may submit provider-native JSON Schema as a provider-specific optimization. Adapters return raw text; GE owns parse, local validation, and bounded repair.
 - OpenRouter uses ordinary chat completions plus JSON instructions. It does **not** send `response_format=json_schema`.
 - One initial attempt plus at most one generic structural repair share the original `deadline_ms`.
 - Labs that need provider-specific routing/reasoning knobs GE cannot express may still use a bounded direct path.

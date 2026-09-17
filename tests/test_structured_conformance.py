@@ -242,3 +242,44 @@ async def test_known_usage_is_summed_across_attempts() -> None:
     assert result.observation.cached_input_tokens == 1
     assert result.observation.output_tokens == 5
     assert result.observation.cost_usd is None
+
+
+@pytest.mark.asyncio
+async def test_provider_error_unknown_usage_does_not_keep_partial_total() -> None:
+    provider = ScriptedText(
+        [
+            _result(text="bad", parsed=None, input_tokens=100, output_tokens=10),
+            ProviderError.from_code(FailureCode.PROVIDER_ERROR),
+        ]
+    )
+    client = GenerationClient(text_provider=provider)
+    with pytest.raises(GenerationEngineError) as exc:
+        await client.generate_structured(_request())
+    assert exc.value.failure.code is FailureCode.PROVIDER_ERROR
+    assert exc.value.observation.input_tokens is None
+    assert exc.value.observation.output_tokens is None
+    assert exc.value.observation.cached_input_tokens is None
+    assert exc.value.observation.conformance_retry_count == 1
+
+
+@pytest.mark.asyncio
+async def test_provider_error_known_usage_is_included_in_aggregate() -> None:
+    provider = ScriptedText(
+        [
+            _result(text="bad", parsed=None, input_tokens=100, cached_input_tokens=2, output_tokens=10),
+            ProviderError.from_code(
+                FailureCode.PROVIDER_ERROR,
+                input_tokens=25,
+                cached_input_tokens=1,
+                output_tokens=3,
+            ),
+        ]
+    )
+    client = GenerationClient(text_provider=provider)
+    with pytest.raises(GenerationEngineError) as exc:
+        await client.generate_structured(_request())
+    assert exc.value.failure.code is FailureCode.PROVIDER_ERROR
+    assert exc.value.observation.input_tokens == 125
+    assert exc.value.observation.cached_input_tokens == 3
+    assert exc.value.observation.output_tokens == 13
+    assert exc.value.observation.conformance_retry_count == 1

@@ -646,6 +646,8 @@ def _elapsed_ms(started: float) -> int:
 
 
 def _aggregate_usage(results: list) -> dict[str, int | None]:
+    """Sum known attempt usage. Any unknown field makes that aggregate None."""
+
     def _field(name: str) -> int | None:
         values = [getattr(item, name, None) for item in results]
         if not values or any(value is None for value in values):
@@ -671,7 +673,10 @@ def _structured_observation(
     failure: InferenceFailure,
     result=None,
 ) -> InferenceObservation:
-    usage = _aggregate_usage(usage_results)
+    items = list(usage_results)
+    if isinstance(result, ProviderError):
+        items.append(result)
+    usage = _aggregate_usage(items)
     terminal = result
     return _failed_observation(
         failure=failure,
