@@ -199,7 +199,10 @@ InferenceObservation
   output_tokens         int | None
   cost_usd              float | None
   latency_ms            int
-  retry_count           int
+  retry_count           int              # transport retries; backward compatible
+  transport_retry_count int | None       # same meaning as retry_count
+  conformance_retry_count int            # structured repair attempts after invalid structure
+  provider_attempt_count int | None      # total provider generate invocations
   state                 completed | refused | failed | incomplete
   failure_code          str | None
   pricing_source        str | None   # catalog version / identifier used for cost
@@ -220,7 +223,9 @@ Python names may differ; semantics must not.
 
 ### Retry count
 
-`retry_count` is the number of **additional** attempts after the first try. `0` means the first attempt produced the final result (success or non-retryable failure). Exhausting a 3-attempt policy yields `retry_count == 2` if two retries ran, not a hard-coded `3`.
+`retry_count` is the number of **additional transport** attempts after the first try of a provider call. `0` means the first attempt produced the final provider result (success or non-retryable failure). Exhausting a 3-attempt policy yields `retry_count == 2` if two retries ran, not a hard-coded `3`.
+
+Structured generation may also issue a **conformance retry** after a successful provider call returned structurally invalid output. That is not a transport retry. `conformance_retry_count` counts those repairs. `provider_attempt_count` counts every provider generate invocation across both reasons.
 
 ### Multiple provider calls
 
@@ -339,17 +344,19 @@ E2A found no DungeonMindServer caller of legacy `generate_stream`. The coordinat
 [STRUCTURED-CONFORMANCE.md](STRUCTURED-CONFORMANCE.md) is the adopted refinement of this section. Provider-native strict-schema features are implementation strategies, not the semantic definition of `generate_structured()`.
 
 - Products own Pydantic/domain schemas and their domain meaning (`MapSpec`, card item schemas, and so on).
-- GenerationEngine owns structural conformance of inference output to the caller-supplied schema once that layer is implemented.
+- GenerationEngine owns structural conformance of inference output to the caller-supplied schema.
 - The engine accepts **JSON Schema** (current) and may later accept a Pydantic type as a convenience that is immediately reduced to JSON Schema. The public contract must not require importing product models.
 - Refusal uses `PROVIDER_REFUSED`. Parse/schema mismatch uses `STRUCTURED_OUTPUT_INVALID`.
 - Result shape: text content, optional parsed object, observation, optional failure. Parsed data is not a product domain type inside the engine.
 - Tests use a domain-neutral schema (for example a `{name: str, count: int}` fixture), never MapSpec/statblock/card models.
 
-Current E5B implementation, until [STRUCTURED-CONFORMANCE.md](STRUCTURED-CONFORMANCE.md) is implemented:
+Current E5B.1 implementation:
 
-- OpenAI may submit provider-native JSON Schema as a provider-specific optimization. That is not the definition of structured generation.
-- OpenRouter does **not** send `response_format=json_schema`. `generate_structured()` through OpenRouter fails closed with `UNSUPPORTED_CAPABILITY`.
-- Labs that need OpenRouter structured output stay on a bounded direct provider path until the conformance layer exists.
+- `generate_structured()` always performs GenerationEngine-owned local JSON Schema validation before success.
+- OpenAI may submit provider-native JSON Schema as a provider-specific optimization, then GE still validates locally.
+- OpenRouter uses ordinary chat completions plus JSON instructions. It does **not** send `response_format=json_schema`.
+- One initial attempt plus at most one generic structural repair share the original `deadline_ms`.
+- Labs that need provider-specific routing/reasoning knobs GE cannot express may still use a bounded direct path.
 
 ---
 
@@ -394,7 +401,7 @@ A Fal image consumer must fail with `CONFIGURATION_UNAVAILABLE` / `UNSUPPORTED_C
 Recommended packaging:
 
 ```text
-core:             pydantic, httpx, tenacity
+core:             pydantic, httpx, tenacity, jsonschema
 openai extra:     openai
 openrouter extra: openai   # OpenAI-compatible SDK; provider identity remains openrouter
 fal extra:        fal-client

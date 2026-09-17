@@ -1,9 +1,8 @@
 """OpenRouter text adapter. Provider identity is openrouter, not openai.
 
-Ordinary text and streaming are in scope. This adapter does not implement
-GenerationEngine structured generation: provider-native `json_schema` is not
-the structured contract. That belongs to a provider-independent conformance
-layer in a successor slice.
+Structured generation uses ordinary chat completions plus JSON instructions.
+Provider-native json_schema is not sent. GenerationEngine local validation is
+the structured contract.
 """
 
 from __future__ import annotations
@@ -12,6 +11,7 @@ import os
 from collections.abc import AsyncIterator
 from typing import Any
 
+from generationengine.conformance import schema_instruction
 from generationengine.failures import FailureCode
 from generationengine.observation import InferenceObservation, ObservationState
 from generationengine.providers.base import (
@@ -31,10 +31,6 @@ from generationengine.providers.openai_compatible import (
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 PROVIDER_ID = "openrouter"
-STRUCTURED_NOT_IMPLEMENTED = (
-    "GenerationEngine structured generation is not implemented for OpenRouter in this slice. "
-    "Provider-native json_schema is not the structured contract."
-)
 
 
 class OpenRouterTextProvider:
@@ -56,7 +52,6 @@ class OpenRouterTextProvider:
         )
 
     async def generate(self, call: TextGenerationCall) -> TextGenerationResult:
-        _reject_structured_call(call)
         kwargs = self._request_kwargs(call)
         try:
             response = await self._client.chat.completions.create(**kwargs)
@@ -71,7 +66,6 @@ class OpenRouterTextProvider:
         response_id = None
         response_model = None
         try:
-            _reject_structured_call(call)
             kwargs = self._request_kwargs(call, streaming=True)
             stream = await self._client.chat.completions.create(**kwargs)
             async for chunk in stream:
@@ -113,8 +107,12 @@ class OpenRouterTextProvider:
 
     def _request_kwargs(self, call: TextGenerationCall, *, streaming: bool = False) -> dict[str, Any]:
         messages: list[dict[str, str]] = []
-        if call.system_prompt:
-            messages.append({"role": "system", "content": call.system_prompt})
+        system_prompt = call.system_prompt
+        if call.json_schema and not streaming:
+            guide = schema_instruction(call.json_schema)
+            system_prompt = f"{system_prompt}\n\n{guide}" if system_prompt else guide
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": call.user_prompt})
         kwargs: dict[str, Any] = {
             "model": call.model,
@@ -151,15 +149,6 @@ class OpenRouterTextProvider:
 
     def _map_exception(self, exc: Exception) -> ProviderError:
         return map_openai_compatible_exception(exc)
-
-
-def _reject_structured_call(call: TextGenerationCall) -> None:
-    if call.json_schema is None:
-        return
-    raise ProviderError.from_code(
-        FailureCode.UNSUPPORTED_CAPABILITY,
-        STRUCTURED_NOT_IMPLEMENTED,
-    )
 
 
 def _usage_fields(usage: Any) -> dict[str, int | None]:

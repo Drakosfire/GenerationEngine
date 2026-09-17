@@ -1,6 +1,6 @@
 # Structured conformance
 
-**Status:** ADOPTED CONTRACT REFINEMENT — implementation incomplete on `main`  
+**Status:** IMPLEMENTED IN E5B.1 — local validation and one bounded structural repair  
 **Date:** 2026-09-16  
 **Related:** `CORE-CONTRACT.md` §8 Structured output
 
@@ -157,9 +157,9 @@ The OpenRouter work that motivated this refinement demonstrated why the contract
 
 The Buddy lab has used a DeepSeek model through OpenRouter with JSON-object/instruction/local-validation behavior. A strict native `json_schema` request is therefore not a safe universal definition of OpenRouter structured generation.
 
-Until this conformance layer is implemented and proved, provider adapters must not overclaim structured support based only on OpenAI-compatible request syntax.
+Provider adapters must not overclaim structured support based only on OpenAI-compatible request syntax. OpenRouter structured generation in E5B.1 uses JSON instructions, not native `json_schema`.
 
-The current bounded lab-direct path remains acceptable when GE cannot yet reproduce the required provider-specific behavior without changing experiment semantics.
+The bounded lab-direct path remains acceptable when GE cannot yet reproduce required provider-specific routing/reasoning controls without changing experiment semantics.
 
 ## Migration consequence for consumers
 
@@ -177,7 +177,7 @@ Do not bulk-delete validation merely because it uses Pydantic or JSON. Ownership
 
 ## Acceptance tests
 
-The eventual implementation should prove at least:
+The implementation should prove at least:
 
 1. native strict-schema provider path still receives final local validation;
 2. non-native JSON/text path can produce a schema-valid result through bounded correction;

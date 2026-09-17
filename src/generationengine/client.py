@@ -8,6 +8,13 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TypeVar
 
 from generationengine.catalog import Capability
+from generationengine.conformance import (
+    ConformanceError,
+    candidate_from_result,
+    check_schema,
+    repair_instruction,
+    validate_against_schema,
+)
 from generationengine.failures import FailureCode, InferenceFailure
 from generationengine.observation import InferenceObservation, ObservationState
 from generationengine.providers.base import (
@@ -30,6 +37,7 @@ from generationengine.types import (
 )
 
 MAX_ATTEMPTS = 3
+MAX_CONFORMANCE_RETRIES = 1
 DEFAULT_DEADLINE_S = 60.0
 BACKOFF_SECONDS = (0.5, 1.0)
 
@@ -117,7 +125,7 @@ class GenerationClient:
                     "generate_structured requires json_schema.",
                 )
             )
-        return await self._generate_text(request, capability=Capability.STRUCTURED_TEXT)
+        return await self._generate_structured(request)
 
     async def stream_text(self, request: TextRequest) -> AsyncIterator[TextStreamEvent]:
         """Yield deltas, then exactly one terminal. Streaming does not retry."""
@@ -280,6 +288,8 @@ class GenerationClient:
             result=result,
             latency_ms=_elapsed_ms(started),
             retry_count=retry_count,
+            conformance_retry_count=0,
+            provider_attempt_count=1 + retry_count,
         )
         if result.refused:
             failure = InferenceFailure.from_code(
@@ -296,6 +306,166 @@ class GenerationClient:
                 ),
             )
         return TextResult(text=result.text, parsed=result.parsed, observation=observation)
+
+    async def _generate_structured(self, request: TextRequest) -> TextResult:
+        started = time.monotonic()
+        deadline_s = _deadline_s(request.deadline_ms)
+        try:
+            resolution = resolve(
+                capability=Capability.STRUCTURED_TEXT,
+                profile=request.profile,
+                model=request.model,
+                provider=request.provider,
+            )
+        except ResolutionError as exc:
+            raise _config_error(exc.failure, request=request) from exc
+        provider = self._text_provider_for(resolution.provider)
+        schema = request.json_schema
+        assert schema is not None
+        try:
+            check_schema(schema)
+        except ConformanceError as exc:
+            raise _config_error(
+                InferenceFailure.from_code(
+                    FailureCode.INVALID_REQUEST,
+                    "generate_structured requires a valid JSON Schema object.",
+                ),
+                request=request,
+            ) from exc
+
+        usage_results: list = []
+        transport_retries = 0
+        conformance_retries = 0
+        provider_attempts = 0
+        call = _text_call(request, resolution.provider_model_id)
+
+        while True:
+            if _remaining_s(started, deadline_s) <= 0:
+                raise GenerationEngineError(
+                    InferenceFailure.from_code(FailureCode.PROVIDER_TIMEOUT),
+                    _structured_observation(
+                        request=request,
+                        resolution=resolution,
+                        latency_ms=_elapsed_ms(started),
+                        transport_retries=transport_retries,
+                        conformance_retries=conformance_retries,
+                        provider_attempts=provider_attempts,
+                        usage_results=usage_results,
+                        failure=InferenceFailure.from_code(FailureCode.PROVIDER_TIMEOUT),
+                    ),
+                )
+            try:
+                result, call_retries = await _execute_with_retries(
+                    started=started,
+                    deadline_s=deadline_s,
+                    attempt=lambda current=call: provider.generate(current),
+                )
+            except ProviderError as exc:
+                failed_retries = _retry_count_from_error(exc)
+                raise GenerationEngineError(
+                    exc.failure,
+                    _structured_observation(
+                        request=request,
+                        resolution=resolution,
+                        latency_ms=_elapsed_ms(started),
+                        transport_retries=transport_retries + failed_retries,
+                        conformance_retries=conformance_retries,
+                        provider_attempts=provider_attempts + 1 + failed_retries,
+                        usage_results=usage_results,
+                        failure=exc.failure,
+                        result=exc,
+                    ),
+                ) from exc
+            transport_retries += call_retries
+            provider_attempts += 1 + call_retries
+            usage_results.append(result)
+            if result.refused:
+                failure = InferenceFailure.from_code(
+                    FailureCode.PROVIDER_REFUSED,
+                    "Provider refused the request.",
+                )
+                raise GenerationEngineError(
+                    failure,
+                    _structured_observation(
+                        request=request,
+                        resolution=resolution,
+                        latency_ms=_elapsed_ms(started),
+                        transport_retries=transport_retries,
+                        conformance_retries=conformance_retries,
+                        provider_attempts=provider_attempts,
+                        usage_results=usage_results,
+                        failure=failure,
+                        result=result,
+                    ),
+                )
+            try:
+                parsed = candidate_from_result(result)
+                validate_against_schema(parsed, schema)
+            except ConformanceError as failure:
+                if conformance_retries >= MAX_CONFORMANCE_RETRIES:
+                    invalid = InferenceFailure.from_code(
+                        FailureCode.STRUCTURED_OUTPUT_INVALID,
+                        "Structured output did not satisfy the supplied schema.",
+                    )
+                    raise GenerationEngineError(
+                        invalid,
+                        _structured_observation(
+                            request=request,
+                            resolution=resolution,
+                            latency_ms=_elapsed_ms(started),
+                            transport_retries=transport_retries,
+                            conformance_retries=conformance_retries,
+                            provider_attempts=provider_attempts,
+                            usage_results=usage_results,
+                            failure=invalid,
+                            result=result,
+                        ),
+                    ) from None
+                if _remaining_s(started, deadline_s) <= 0:
+                    timeout = InferenceFailure.from_code(FailureCode.PROVIDER_TIMEOUT)
+                    raise GenerationEngineError(
+                        timeout,
+                        _structured_observation(
+                            request=request,
+                            resolution=resolution,
+                            latency_ms=_elapsed_ms(started),
+                            transport_retries=transport_retries,
+                            conformance_retries=conformance_retries,
+                            provider_attempts=provider_attempts,
+                            usage_results=usage_results,
+                            failure=timeout,
+                            result=result,
+                        ),
+                    ) from None
+                conformance_retries += 1
+                call = _text_call(
+                    request,
+                    resolution.provider_model_id,
+                    user_prompt=f"{request.user_prompt}\n\n{repair_instruction(failure)}",
+                )
+                continue
+            usage = _aggregate_usage(usage_results)
+            observation = InferenceObservation(
+                provider=resolution.provider,
+                requested_profile=request.profile.value if request.profile else None,
+                requested_model=request.model,
+                resolved_model=resolution.resolved_model,
+                response_model=result.response_model,
+                provider_request_id=result.provider_request_id,
+                provider_response_id=getattr(result, "provider_response_id", None),
+                input_tokens=usage["input_tokens"],
+                cached_input_tokens=usage["cached_input_tokens"],
+                output_tokens=usage["output_tokens"],
+                cost_usd=None,
+                latency_ms=_elapsed_ms(started),
+                retry_count=transport_retries,
+                transport_retry_count=transport_retries,
+                conformance_retry_count=conformance_retries,
+                provider_attempt_count=provider_attempts,
+                state=ObservationState.COMPLETED,
+                pricing_source=resolution.pricing_source,
+            )
+            return TextResult(text=result.text, parsed=parsed, observation=observation)
 
     async def _generate_image(
         self,
@@ -374,10 +544,14 @@ class GenerationClient:
         return ImageResult(images=images, observation=observation)
 
 
-def _text_call(request: TextRequest, model: str) -> TextGenerationCall:
+def _text_call(
+    request: TextRequest,
+    model: str,
+    user_prompt: str | None = None,
+) -> TextGenerationCall:
     return TextGenerationCall(
         model=model,
-        user_prompt=request.user_prompt,
+        user_prompt=request.user_prompt if user_prompt is None else user_prompt,
         system_prompt=request.system_prompt,
         temperature=request.temperature,
         json_schema=request.json_schema,
@@ -469,6 +643,50 @@ def _retry_count_from_error(exc: ProviderError) -> int:
 
 def _elapsed_ms(started: float) -> int:
     return max(int((time.monotonic() - started) * 1000), 0)
+
+
+def _aggregate_usage(results: list) -> dict[str, int | None]:
+    def _field(name: str) -> int | None:
+        values = [getattr(item, name, None) for item in results]
+        if not values or any(value is None for value in values):
+            return None
+        return sum(values)
+
+    return {
+        "input_tokens": _field("input_tokens"),
+        "cached_input_tokens": _field("cached_input_tokens"),
+        "output_tokens": _field("output_tokens"),
+    }
+
+
+def _structured_observation(
+    *,
+    request: TextRequest,
+    resolution,
+    latency_ms: int,
+    transport_retries: int,
+    conformance_retries: int,
+    provider_attempts: int,
+    usage_results: list,
+    failure: InferenceFailure,
+    result=None,
+) -> InferenceObservation:
+    usage = _aggregate_usage(usage_results)
+    terminal = result
+    return _failed_observation(
+        failure=failure,
+        request=request,
+        resolution=resolution,
+        latency_ms=latency_ms,
+        retry_count=transport_retries,
+        result=terminal if isinstance(terminal, ProviderError) else None,
+        provider_request_id=getattr(terminal, "provider_request_id", None),
+        provider_response_id=getattr(terminal, "provider_response_id", None),
+        response_model=getattr(terminal, "response_model", None),
+        usage=usage,
+        conformance_retry_count=conformance_retries,
+        provider_attempt_count=provider_attempts,
+    )
 
 
 def _config_error(
@@ -573,6 +791,9 @@ def _completed_observation_from_stream(
         retry_count=0,
         state=ObservationState.COMPLETED,
         pricing_source=resolution.pricing_source,
+        conformance_retry_count=0,
+        provider_attempt_count=1,
+        transport_retry_count=0,
     )
 
 
@@ -583,6 +804,8 @@ def _completed_observation(
     result,
     latency_ms: int,
     retry_count: int,
+    conformance_retry_count: int = 0,
+    provider_attempt_count: int | None = None,
 ) -> InferenceObservation:
     return InferenceObservation(
         provider=resolution.provider,
@@ -598,6 +821,9 @@ def _completed_observation(
         cost_usd=None,
         latency_ms=latency_ms,
         retry_count=retry_count,
+        transport_retry_count=retry_count,
+        conformance_retry_count=conformance_retry_count,
+        provider_attempt_count=provider_attempt_count if provider_attempt_count is not None else 1 + retry_count,
         state=ObservationState.COMPLETED,
         pricing_source=resolution.pricing_source,
     )
@@ -619,6 +845,9 @@ def _failed_observation(
     input_tokens: int | None = None,
     cached_input_tokens: int | None = None,
     output_tokens: int | None = None,
+    conformance_retry_count: int = 0,
+    provider_attempt_count: int | None = None,
+    usage: dict[str, int | None] | None = None,
 ) -> InferenceObservation:
     profile = None
     model = None
@@ -647,13 +876,30 @@ def _failed_observation(
         or (result.provider_request_id if result else None),
         provider_response_id=provider_response_id
         or (getattr(result, "provider_response_id", None) if result else None),
-        input_tokens=input_tokens if input_tokens is not None else (result.input_tokens if result else None),
-        cached_input_tokens=cached_input_tokens
-        if cached_input_tokens is not None
-        else (result.cached_input_tokens if result else None),
-        output_tokens=output_tokens if output_tokens is not None else (result.output_tokens if result else None),
+        input_tokens=(
+            usage["input_tokens"]
+            if usage is not None
+            else (input_tokens if input_tokens is not None else (result.input_tokens if result else None))
+        ),
+        cached_input_tokens=(
+            usage["cached_input_tokens"]
+            if usage is not None
+            else (
+                cached_input_tokens
+                if cached_input_tokens is not None
+                else (result.cached_input_tokens if result else None)
+            )
+        ),
+        output_tokens=(
+            usage["output_tokens"]
+            if usage is not None
+            else (output_tokens if output_tokens is not None else (result.output_tokens if result else None))
+        ),
         latency_ms=latency_ms,
         retry_count=retry_count,
+        transport_retry_count=retry_count,
+        conformance_retry_count=conformance_retry_count,
+        provider_attempt_count=provider_attempt_count,
         state=state,
         failure_code=failure.code,
         pricing_source=resolution.pricing_source if resolution else None,

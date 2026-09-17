@@ -1,0 +1,244 @@
+"""Provider-independent structured conformance for generate_structured()."""
+
+from __future__ import annotations
+
+import pytest
+
+from generationengine import (
+    FailureCode,
+    GenerationClient,
+    GenerationEngineError,
+    InferenceProfile,
+    ObservationState,
+    TextGenerationCall,
+    TextGenerationResult,
+    TextRequest,
+)
+from generationengine.providers.errors import ProviderError
+
+FIXTURE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "count": {"type": "integer"},
+    },
+    "required": ["name", "count"],
+    "additionalProperties": False,
+}
+
+
+class ScriptedText:
+    def __init__(self, outcomes: list) -> None:
+        self.outcomes = list(outcomes)
+        self.calls: list[TextGenerationCall] = []
+
+    async def generate(self, call: TextGenerationCall) -> TextGenerationResult:
+        self.calls.append(call)
+        if not self.outcomes:
+            raise AssertionError("unexpected extra provider call")
+        item = self.outcomes.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    async def stream(self, call: TextGenerationCall):
+        raise NotImplementedError
+
+
+def _result(**kwargs) -> TextGenerationResult:
+    defaults = {
+        "text": '{"name":"ok","count":1}',
+        "parsed": {"name": "ok", "count": 1},
+        "provider_request_id": "req",
+        "response_model": "model",
+        "input_tokens": 10,
+        "cached_input_tokens": 0,
+        "output_tokens": 4,
+    }
+    defaults.update(kwargs)
+    return TextGenerationResult(**defaults)
+
+
+def _request(**kwargs) -> TextRequest:
+    defaults = {
+        "user_prompt": "make fixture",
+        "profile": InferenceProfile.STRUCTURED_LOW_COST,
+        "json_schema": FIXTURE_SCHEMA,
+        "schema_name": "fixture",
+    }
+    defaults.update(kwargs)
+    return TextRequest(**defaults)
+
+
+@pytest.mark.asyncio
+async def test_native_parsed_candidate_is_still_locally_validated() -> None:
+    provider = ScriptedText(
+        [
+            _result(parsed={"name": 1, "count": "nope"}, text='{"name":1,"count":"nope"}'),
+            _result(),
+        ]
+    )
+    client = GenerationClient(text_provider=provider)
+    result = await client.generate_structured(_request())
+    assert result.parsed == {"name": "ok", "count": 1}
+    assert provider.calls[1].user_prompt.endswith(
+        "Return corrected JSON that satisfies the supplied schema."
+    ) or "did not satisfy the required schema" in provider.calls[1].user_prompt
+    assert result.observation.conformance_retry_count == 1
+    assert result.observation.retry_count == 0
+    assert result.observation.transport_retry_count == 0
+    assert result.observation.provider_attempt_count == 2
+
+
+@pytest.mark.asyncio
+async def test_non_native_invalid_then_valid_json() -> None:
+    provider = ScriptedText(
+        [
+            _result(text="not-json", parsed=None, input_tokens=3, output_tokens=1),
+            _result(text='{"name":"x","count":2}', parsed=None, input_tokens=5, output_tokens=2),
+        ]
+    )
+    client = GenerationClient(
+        text_providers={"openrouter": provider},
+    )
+    result = await client.generate_structured(
+        _request(profile=None, provider="openrouter", model="deepseek/deepseek-v4.1-flash")
+    )
+    assert result.parsed == {"name": "x", "count": 2}
+    assert result.observation.provider == "openrouter"
+    assert result.observation.conformance_retry_count == 1
+    assert result.observation.retry_count == 0
+    assert result.observation.transport_retry_count == 0
+    assert result.observation.provider_attempt_count == 2
+    assert result.observation.input_tokens == 8
+    assert result.observation.output_tokens == 3
+
+
+@pytest.mark.asyncio
+async def test_persistent_invalid_output_is_structured_invalid() -> None:
+    provider = ScriptedText(
+        [
+            _result(text="{", parsed=None),
+            _result(text='{"name":1}', parsed=None),
+        ]
+    )
+    client = GenerationClient(text_provider=provider)
+    with pytest.raises(GenerationEngineError) as exc:
+        await client.generate_structured(_request())
+    assert exc.value.failure.code is FailureCode.STRUCTURED_OUTPUT_INVALID
+    assert exc.value.observation.state is ObservationState.INCOMPLETE
+    assert exc.value.observation.conformance_retry_count == 1
+    assert exc.value.observation.provider_attempt_count == 2
+    dumped = exc.value.observation.model_dump()
+    assert "user_prompt" not in dumped
+    assert "prompt" not in dumped
+    assert "{" not in str(dumped.get("failure_code"))
+
+
+@pytest.mark.asyncio
+async def test_transport_and_conformance_retries_are_distinguishable() -> None:
+    provider = ScriptedText(
+        [
+            _result(text="nope", parsed=None, input_tokens=1, output_tokens=1),
+            ProviderError.from_code(FailureCode.RATE_LIMITED),
+            _result(input_tokens=2, output_tokens=2),
+        ]
+    )
+    client = GenerationClient(text_provider=provider)
+    result = await client.generate_structured(_request(deadline_ms=10_000))
+    assert result.parsed == {"name": "ok", "count": 1}
+    assert result.observation.conformance_retry_count == 1
+    assert result.observation.retry_count == 1
+    assert result.observation.transport_retry_count == 1
+    assert result.observation.provider_attempt_count == 3
+
+
+@pytest.mark.asyncio
+async def test_repair_shares_overall_deadline(monkeypatch) -> None:
+    sleeps: list[float] = []
+
+    async def _no_sleep(_delay: float) -> None:
+        sleeps.append(_delay)
+
+    monkeypatch.setattr("generationengine.client.asyncio.sleep", _no_sleep)
+    provider = ScriptedText(
+        [
+            _result(text="bad", parsed=None),
+            ProviderError.from_code(FailureCode.RATE_LIMITED),
+            ProviderError.from_code(FailureCode.RATE_LIMITED),
+            ProviderError.from_code(FailureCode.RATE_LIMITED),
+        ]
+    )
+    client = GenerationClient(text_provider=provider)
+    with pytest.raises(GenerationEngineError) as exc:
+        await client.generate_structured(_request(deadline_ms=80))
+    assert exc.value.failure.code is FailureCode.RATE_LIMITED
+    assert sleeps == []
+    assert exc.value.observation.conformance_retry_count == 1
+
+
+@pytest.mark.asyncio
+async def test_repair_timeout_is_provider_timeout() -> None:
+    import asyncio
+
+    class SlowSecond(ScriptedText):
+        async def generate(self, call: TextGenerationCall) -> TextGenerationResult:
+            self.calls.append(call)
+            if len(self.calls) == 1:
+                return _result(text="bad", parsed=None)
+            await asyncio.sleep(1)
+            return _result()
+
+    client = GenerationClient(text_provider=SlowSecond([]))
+    with pytest.raises(GenerationEngineError) as exc:
+        await client.generate_structured(_request(deadline_ms=50))
+    assert exc.value.failure.code is FailureCode.PROVIDER_TIMEOUT
+    assert exc.value.observation.conformance_retry_count == 1
+
+
+@pytest.mark.asyncio
+async def test_repair_refusal_is_provider_refused() -> None:
+    provider = ScriptedText(
+        [
+            _result(text="bad", parsed=None),
+            _result(refused=True, text=None, parsed=None),
+        ]
+    )
+    client = GenerationClient(text_provider=provider)
+    with pytest.raises(GenerationEngineError) as exc:
+        await client.generate_structured(_request())
+    assert exc.value.failure.code is FailureCode.PROVIDER_REFUSED
+    assert exc.value.observation.state is ObservationState.REFUSED
+    assert exc.value.observation.conformance_retry_count == 1
+
+
+@pytest.mark.asyncio
+async def test_usage_unknown_propagates_instead_of_partial_sum() -> None:
+    provider = ScriptedText(
+        [
+            _result(text="bad", parsed=None, input_tokens=10, output_tokens=1),
+            _result(input_tokens=None, output_tokens=None, cached_input_tokens=None),
+        ]
+    )
+    client = GenerationClient(text_provider=provider)
+    result = await client.generate_structured(_request())
+    assert result.parsed == {"name": "ok", "count": 1}
+    assert result.observation.input_tokens is None
+    assert result.observation.output_tokens is None
+    assert result.observation.cost_usd is None
+
+
+@pytest.mark.asyncio
+async def test_known_usage_is_summed_across_attempts() -> None:
+    provider = ScriptedText(
+        [
+            _result(text="bad", parsed=None, input_tokens=4, cached_input_tokens=1, output_tokens=2),
+            _result(input_tokens=6, cached_input_tokens=0, output_tokens=3),
+        ]
+    )
+    client = GenerationClient(text_provider=provider)
+    result = await client.generate_structured(_request())
+    assert result.observation.input_tokens == 10
+    assert result.observation.cached_input_tokens == 1
+    assert result.observation.output_tokens == 5
+    assert result.observation.cost_usd is None

@@ -41,14 +41,15 @@ def test_explicit_zero_usage_is_zero() -> None:
     assert observation.cost_usd == 0.0
 
 
-def test_retry_count_is_additional_attempts() -> None:
-    """Three total attempts means two retries."""
+def test_transport_retry_count_defaults_to_retry_count() -> None:
     observation = InferenceObservation(
-        latency_ms=100,
+        latency_ms=10,
         retry_count=2,
         state=ObservationState.COMPLETED,
     )
-    assert observation.retry_count == 2
+    assert observation.transport_retry_count == 2
+    assert observation.conformance_retry_count == 0
+    assert observation.provider_attempt_count is None
 
 
 def test_completed_cannot_include_failure_code() -> None:

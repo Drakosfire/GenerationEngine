@@ -64,7 +64,7 @@ result = await client.generate_structured(
 print(result.parsed)
 ```
 
-`generate_structured()` currently uses the OpenAI adapter's native schema path for OpenAI calls. That is a provider-specific optimization, not the structured contract; see [docs/STRUCTURED-CONFORMANCE.md](docs/STRUCTURED-CONFORMANCE.md). OpenRouter is text and stream only in this slice; `generate_structured()` through OpenRouter fails closed until that conformance layer exists. Labs should keep a bounded direct OpenRouter path for structured experiments until then.
+`generate_structured()` performs GenerationEngine-owned local schema validation. OpenAI native JSON Schema is an optimization, not the contract; see [docs/STRUCTURED-CONFORMANCE.md](docs/STRUCTURED-CONFORMANCE.md). OpenRouter uses JSON instructions rather than native `json_schema`. Labs that need provider-specific routing/reasoning knobs GE cannot express may still use a bounded direct path.
 
 Image generation returns bytes. Products publish artifacts:
 
