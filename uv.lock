@@ -102,6 +102,9 @@ fal = [
 openai = [
     { name = "openai" },
 ]
+openrouter = [
+    { name = "openai" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -115,6 +118,7 @@ requires-dist = [
     { name = "fal-client", marker = "extra == 'fal'", specifier = ">=0.5.6" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=2.14.0" },
+    { name = "openai", marker = "extra == 'openrouter'", specifier = ">=2.14.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "tenacity", specifier = ">=8.2.0" },
 ]

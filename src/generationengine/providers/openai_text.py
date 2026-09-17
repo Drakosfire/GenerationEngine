@@ -18,23 +18,12 @@ from generationengine.providers.base import (
     TextStreamEvent,
 )
 from generationengine.providers.errors import ProviderError
+from generationengine.providers.openai_compatible import (
+    AsyncOpenAI,
+    map_openai_compatible_exception,
+    require_openai_sdk,
+)
 from generationengine.utils.schema_utils import make_schema_strict
-
-try:
-    from openai import APIError, APITimeoutError, AsyncOpenAI, RateLimitError
-except ImportError:
-    AsyncOpenAI = None  # type: ignore
-    RateLimitError = None  # type: ignore
-    APITimeoutError = None  # type: ignore
-    APIError = None  # type: ignore
-
-
-def _require_openai() -> None:
-    if AsyncOpenAI is None:
-        raise ProviderError.from_code(
-            FailureCode.CONFIGURATION_UNAVAILABLE,
-            "openai extra is not installed. Install generationengine[openai].",
-        )
 
 
 class OpenAITextProvider:
@@ -42,7 +31,7 @@ class OpenAITextProvider:
         if client is not None:
             self._client = client
             return
-        _require_openai()
+        require_openai_sdk(extra_name="openai", client_cls=AsyncOpenAI)
         key = api_key or os.getenv("OPENAI_API_KEY")
         if not key:
             raise ProviderError.from_code(
@@ -179,28 +168,7 @@ class OpenAITextProvider:
         )
 
     def _map_exception(self, exc: Exception) -> ProviderError:
-        if isinstance(exc, ProviderError):
-            return exc
-        name = type(exc).__name__
-        message = str(exc) or name
-        request_id = _request_id_from_exception(exc)
-        kwargs = {"provider_request_id": request_id}
-        if _is_sdk_exception(exc, RateLimitError) or "RateLimit" in name:
-            return ProviderError.from_code(FailureCode.RATE_LIMITED, message, **kwargs)
-        if _is_sdk_exception(exc, APITimeoutError) or "Timeout" in name:
-            return ProviderError.from_code(FailureCode.PROVIDER_TIMEOUT, message, **kwargs)
-        status = getattr(exc, "status_code", None)
-        if status == 429:
-            return ProviderError.from_code(FailureCode.RATE_LIMITED, message, **kwargs)
-        if isinstance(status, int) and status >= 500:
-            return ProviderError.from_code(FailureCode.PROVIDER_UNAVAILABLE, message, **kwargs)
-        if _is_sdk_exception(exc, APIError):
-            return ProviderError.from_code(FailureCode.PROVIDER_ERROR, message, **kwargs)
-        return ProviderError.from_code(FailureCode.PROVIDER_ERROR, message, **kwargs)
-
-
-def _is_sdk_exception(exc: Exception, sdk_type: type[Exception] | None) -> bool:
-    return sdk_type is not None and isinstance(exc, sdk_type)
+        return map_openai_compatible_exception(exc)
 
 
 def _empty_failed_observation(code: FailureCode) -> InferenceObservation:
@@ -232,7 +200,3 @@ def _completed_observation(result: TextGenerationResult) -> InferenceObservation
 
 def _ids_from_response(response: Any) -> tuple[str | None, str | None]:
     return getattr(response, "_request_id", None), getattr(response, "id", None)
-
-
-def _request_id_from_exception(exc: Exception) -> str | None:
-    return getattr(exc, "request_id", None) or getattr(exc, "_request_id", None)
