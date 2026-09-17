@@ -151,6 +151,9 @@ async def test_transport_and_conformance_retries_are_distinguishable() -> None:
     assert result.observation.retry_count == 1
     assert result.observation.transport_retry_count == 1
     assert result.observation.provider_attempt_count == 3
+    assert result.observation.input_tokens is None
+    assert result.observation.cached_input_tokens is None
+    assert result.observation.output_tokens is None
 
 
 @pytest.mark.asyncio
@@ -283,3 +286,50 @@ async def test_provider_error_known_usage_is_included_in_aggregate() -> None:
     assert exc.value.observation.cached_input_tokens == 3
     assert exc.value.observation.output_tokens == 13
     assert exc.value.observation.conformance_retry_count == 1
+
+
+@pytest.mark.asyncio
+async def test_recovered_retry_unknown_usage_makes_aggregate_none() -> None:
+    provider = ScriptedText(
+        [
+            _result(text="nope", parsed=None, input_tokens=1, output_tokens=1),
+            ProviderError.from_code(FailureCode.RATE_LIMITED),
+            _result(input_tokens=2, output_tokens=2),
+        ]
+    )
+    client = GenerationClient(text_provider=provider)
+    result = await client.generate_structured(_request(deadline_ms=10_000))
+    assert result.parsed == {"name": "ok", "count": 1}
+    assert result.observation.provider_attempt_count == 3
+    assert result.observation.transport_retry_count == 1
+    assert result.observation.conformance_retry_count == 1
+    assert result.observation.input_tokens is None
+    assert result.observation.cached_input_tokens is None
+    assert result.observation.output_tokens is None
+    assert result.observation.cost_usd is None
+
+
+@pytest.mark.asyncio
+async def test_recovered_retry_known_usage_is_included_in_aggregate() -> None:
+    provider = ScriptedText(
+        [
+            _result(text="nope", parsed=None, input_tokens=1, cached_input_tokens=0, output_tokens=1),
+            ProviderError.from_code(
+                FailureCode.RATE_LIMITED,
+                input_tokens=5,
+                cached_input_tokens=0,
+                output_tokens=0,
+            ),
+            _result(input_tokens=2, cached_input_tokens=0, output_tokens=2),
+        ]
+    )
+    client = GenerationClient(text_provider=provider)
+    result = await client.generate_structured(_request(deadline_ms=10_000))
+    assert result.parsed == {"name": "ok", "count": 1}
+    assert result.observation.provider_attempt_count == 3
+    assert result.observation.transport_retry_count == 1
+    assert result.observation.conformance_retry_count == 1
+    assert result.observation.input_tokens == 8
+    assert result.observation.cached_input_tokens == 0
+    assert result.observation.output_tokens == 3
+    assert result.observation.cost_usd is None

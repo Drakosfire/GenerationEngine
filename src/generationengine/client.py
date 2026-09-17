@@ -359,6 +359,7 @@ class GenerationClient:
                     started=started,
                     deadline_s=deadline_s,
                     attempt=lambda current=call: provider.generate(current),
+                    attempt_usage=usage_results,
                 )
             except ProviderError as exc:
                 failed_retries = _retry_count_from_error(exc)
@@ -378,7 +379,6 @@ class GenerationClient:
                 ) from exc
             transport_retries += call_retries
             provider_attempts += 1 + call_retries
-            usage_results.append(result)
             if result.refused:
                 failure = InferenceFailure.from_code(
                     FailureCode.PROVIDER_REFUSED,
@@ -564,13 +564,23 @@ async def _execute_with_retries(
     started: float,
     deadline_s: float,
     attempt: Callable[[], Awaitable[T]],
+    attempt_usage: list | None = None,
 ) -> tuple[T, int]:
     """Run one provider operation under a single overall deadline.
 
     `deadline_s` bounds the whole GenerationEngine call, including backoff.
     Each attempt is limited to remaining budget. Provider SDK retries are not
     this loop; adapters must disable them.
+
+    When `attempt_usage` is provided, every provider generate outcome is
+    appended — including retryable errors that later recover — so callers can
+    aggregate usage across the whole operation.
     """
+
+    def _record(item: object) -> None:
+        if attempt_usage is not None:
+            attempt_usage.append(item)
+
     last_error: ProviderError | None = None
     retry_count = 0
     for attempt_index in range(MAX_ATTEMPTS):
@@ -580,12 +590,15 @@ async def _execute_with_retries(
             break
         try:
             result = await _with_timeout(attempt(), remaining)
+            _record(result)
             return result, retry_count
         except ProviderError as exc:
+            _record(exc)
             last_error = exc
             last_error.retry_count = retry_count
         except TimeoutError:
             last_error = _timeout_error(deadline_s, retry_count=retry_count)
+            _record(last_error)
         if not last_error.retryable or attempt_index == MAX_ATTEMPTS - 1:
             raise last_error
         delay = BACKOFF_SECONDS[min(attempt_index, len(BACKOFF_SECONDS) - 1)]
@@ -674,7 +687,7 @@ def _structured_observation(
     result=None,
 ) -> InferenceObservation:
     items = list(usage_results)
-    if isinstance(result, ProviderError):
+    if isinstance(result, ProviderError) and result not in items:
         items.append(result)
     usage = _aggregate_usage(items)
     terminal = result
