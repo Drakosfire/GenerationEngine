@@ -139,58 +139,54 @@ async def test_openrouter_text_request_omits_response_format() -> None:
 
 
 @pytest.mark.asyncio
-async def test_openrouter_structured_json_schema_is_not_implemented() -> None:
-    completions = _FakeCompletions()
+async def test_openrouter_structured_uses_json_instruction_not_native_schema() -> None:
+    completions = _FakeCompletions(response=_chat_response(text='{"name":"x","count":1}'))
     provider = _provider_with_completions(completions)
-    call = TextGenerationCall(
-        model="deepseek/deepseek-v4.1-flash",
-        user_prompt="hello",
-        json_schema={
-            "type": "object",
-            "properties": {"name": {"type": "string"}, "count": {"type": "integer"}},
-            "required": ["name", "count"],
-        },
-        schema_name="fixture",
+    result = await provider.generate(
+        TextGenerationCall(
+            model="deepseek/deepseek-v4.1-flash",
+            user_prompt="hello",
+            json_schema={
+                "type": "object",
+                "properties": {"name": {"type": "string"}, "count": {"type": "integer"}},
+                "required": ["name", "count"],
+            },
+            schema_name="fixture",
+        )
     )
-    with pytest.raises(ProviderError) as exc:
-        await provider.generate(call)
-    assert exc.value.failure.code is FailureCode.UNSUPPORTED_CAPABILITY
-    assert "json_schema is not the structured contract" in exc.value.failure.message
-    assert completions.calls == []
-
-    events = [event async for event in provider.stream(call)]
-    assert len(events) == 1
-    assert isinstance(events[0], TextFailed)
-    assert events[0].failure.code is FailureCode.UNSUPPORTED_CAPABILITY
-    assert events[0].observation.provider == "openrouter"
-    assert completions.calls == []
+    assert "response_format" not in completions.calls[0]
+    system = completions.calls[0]["messages"][0]
+    assert system["role"] == "system"
+    assert "JSON Schema" in system["content"]
+    assert result.parsed is None
+    assert result.text == '{"name":"x","count":1}'
 
 
 @pytest.mark.asyncio
-async def test_client_openrouter_generate_structured_fails_before_provider_call() -> None:
-    from generationengine import GenerationClient, GenerationEngineError, TextRequest
+async def test_client_openrouter_generate_structured_uses_conformance() -> None:
+    from generationengine import GenerationClient, TextRequest
 
-    completions = _FakeCompletions()
+    completions = _FakeCompletions(response=_chat_response(text='{"name":"ok","count":1}'))
     client = GenerationClient(
         text_providers={"openrouter": _provider_with_completions(completions)}
     )
-    with pytest.raises(GenerationEngineError) as exc:
-        await client.generate_structured(
-            TextRequest(
-                user_prompt="hello",
-                provider="openrouter",
-                model="deepseek/deepseek-v4.1-flash",
-                json_schema={
-                    "type": "object",
-                    "properties": {"name": {"type": "string"}},
-                    "required": ["name"],
-                },
-            )
+    result = await client.generate_structured(
+        TextRequest(
+            user_prompt="hello",
+            provider="openrouter",
+            model="deepseek/deepseek-v4.1-flash",
+            json_schema={
+                "type": "object",
+                "properties": {"name": {"type": "string"}, "count": {"type": "integer"}},
+                "required": ["name", "count"],
+                "additionalProperties": False,
+            },
         )
-    assert exc.value.failure.code is FailureCode.UNSUPPORTED_CAPABILITY
-    assert "json_schema is not the structured contract" in exc.value.failure.message
-    assert exc.value.observation.provider == "openrouter"
-    assert completions.calls == []
+    )
+    assert result.parsed == {"name": "ok", "count": 1}
+    assert result.observation.provider == "openrouter"
+    assert result.observation.conformance_retry_count == 0
+    assert completions.calls
 
 
 @pytest.mark.asyncio

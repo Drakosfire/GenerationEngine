@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from collections.abc import AsyncIterator
 from typing import Any
@@ -46,7 +45,7 @@ class OpenAITextProvider:
             response = await self._client.responses.create(**kwargs)
         except Exception as exc:
             raise self._map_exception(exc) from exc
-        return self._result_from_response(response, structured=call.json_schema is not None)
+        return self._result_from_response(response)
 
     async def stream(self, call: TextGenerationCall) -> AsyncIterator[TextStreamEvent]:
         kwargs = self._request_kwargs(call, streaming=True)
@@ -79,7 +78,7 @@ class OpenAITextProvider:
                     elif event_type == "response.completed":
                         response = getattr(event, "response", None)
                         result = (
-                            self._result_from_response(response, structured=False)
+                            self._result_from_response(response)
                             if response is not None
                             else TextGenerationResult(text="".join(pieces))
                         )
@@ -127,7 +126,7 @@ class OpenAITextProvider:
             }
         return kwargs
 
-    def _result_from_response(self, response: Any, *, structured: bool) -> TextGenerationResult:
+    def _result_from_response(self, response: Any) -> TextGenerationResult:
         request_id, response_id = _ids_from_response(response)
         if getattr(response, "refusal", None):
             raise ProviderError.from_code(
@@ -139,18 +138,6 @@ class OpenAITextProvider:
             )
         text = getattr(response, "output_text", None)
         usage = getattr(response, "usage", None)
-        parsed = None
-        if structured and text:
-            try:
-                parsed = json.loads(text)
-            except json.JSONDecodeError as exc:
-                raise ProviderError.from_code(
-                    FailureCode.STRUCTURED_OUTPUT_INVALID,
-                    f"Structured output was not valid JSON: {exc}",
-                    provider_request_id=request_id,
-                    provider_response_id=response_id,
-                    response_model=getattr(response, "model", None),
-                ) from exc
         cached = None
         if usage is not None:
             input_details = getattr(usage, "input_tokens_details", None)
@@ -158,7 +145,7 @@ class OpenAITextProvider:
                 cached = getattr(input_details, "cached_tokens", None)
         return TextGenerationResult(
             text=text,
-            parsed=parsed,
+            parsed=None,
             provider_request_id=request_id,
             provider_response_id=response_id,
             response_model=getattr(response, "model", None),

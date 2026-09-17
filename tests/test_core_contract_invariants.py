@@ -87,6 +87,9 @@ def test_inference_observation_fields_are_specified() -> None:
         "cost_usd",
         "latency_ms",
         "retry_count",
+        "transport_retry_count",
+        "conformance_retry_count",
+        "provider_attempt_count",
         "state",
         "failure_code",
     )

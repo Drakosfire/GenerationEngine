@@ -1,6 +1,6 @@
 # GenerationEngine current state
 
-**Branch:** `e5/explicit-target-provider-dispatch`  
+**Branch:** `e5/structured-conformance`  
 **Contract:** [CORE-CONTRACT.md](CORE-CONTRACT.md)  
 **Structured-conformance refinement:** [STRUCTURED-CONFORMANCE.md](STRUCTURED-CONFORMANCE.md)  
 **Consumer inventory:** [COMPATIBILITY.md](COMPATIBILITY.md)
@@ -8,16 +8,17 @@
 ```text
 public API: GenerationClient
   generate_text
-  generate_structured
+  generate_structured   # GE local schema validation + at most one structural repair
   stream_text
   generate_image
   edit_image
 text dispatch: openai, openrouter (by provider identity)
-openrouter: generate_text + stream_text only
-generate_structured via OpenRouter: UNSUPPORTED_CAPABILITY
-  (provider-native json_schema is not the structured contract)
+openrouter structured: JSON instructions, not native json_schema
 live adapters: OpenAITextProvider, OpenRouterTextProvider, FalProvider
 observations: InferenceObservation on success and failure
+  retry_count = transport retries
+  conformance_retry_count = structured repairs
+  provider_attempt_count = all provider generate calls
 failures: FailureCode / GenerationEngineError (no SDK types)
 image results: bytes only; no Cloudflare, no URLs
 catalog: selection/metadata authority for profile defaults and governed model IDs
@@ -33,18 +34,14 @@ Labs should prefer GenerationEngine explicit targets when the experiment fits th
 
 ## Structured generation status
 
-`generate_structured()` exists today, but this tree does **not yet** implement the full provider-independent structured-conformance contract adopted on 2026-09-16. See [STRUCTURED-CONFORMANCE.md](STRUCTURED-CONFORMANCE.md).
-
-OpenAI may still submit provider-native JSON Schema as a provider-specific optimization. OpenRouter does not: `generate_structured()` through OpenRouter fails closed with `UNSUPPORTED_CAPABILITY` and does not send `response_format=json_schema`. Labs that need OpenRouter/`json_object` plus local validation should keep that direct path until the conformance layer exists.
-
-The adopted target is broader than any provider-native schema feature:
+`generate_structured()` implements the provider-independent structured-conformance contract in [STRUCTURED-CONFORMANCE.md](STRUCTURED-CONFORMANCE.md).
 
 ```text
 caller supplies JSON Schema
 → GenerationEngine chooses provider-specific structured strategy
 → GenerationEngine parses locally
 → GenerationEngine validates locally against the schema
-→ GenerationEngine performs bounded corrective inference retries when needed
+→ GenerationEngine performs at most one corrective inference retry when needed
 → return schema-conforming parsed object OR STRUCTURED_OUTPUT_INVALID
 ```
 
@@ -52,4 +49,4 @@ Provider-native strict schema, JSON-object modes, and prompt/instruction steerin
 
 Products retain domain/business/evidence validation. GenerationEngine owns only structural conformance required to fulfill the inference request.
 
-Until [STRUCTURED-CONFORMANCE.md](STRUCTURED-CONFORMANCE.md) is implemented and accepted, consumers may still contain structural parse/repair loops and bounded lab-specific provider paths. Those are migration sources, not the desired steady state.
+Consumers may still contain domain/evidence validation and, until migrated, leftover structural parse/repair loops. Those loops are migration sources, not the desired steady state.
