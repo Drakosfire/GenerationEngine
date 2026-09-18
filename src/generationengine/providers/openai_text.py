@@ -111,8 +111,9 @@ class OpenAITextProvider:
         kwargs: dict[str, Any] = {
             "model": call.model,
             "input": call.user_prompt,
-            "temperature": call.temperature,
         }
+        if call.temperature is not None:
+            kwargs["temperature"] = call.temperature
         if call.system_prompt:
             kwargs["instructions"] = call.system_prompt
         if call.json_schema and not streaming:

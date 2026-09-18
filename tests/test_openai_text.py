@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from generationengine.providers.base import TextGenerationCall
 from generationengine.providers.openai_text import OpenAITextProvider, _ids_from_response
 
 
@@ -149,3 +150,50 @@ async def test_openai_adapter_malformed_json_is_repaired_by_conformance() -> Non
     assert len(responses.calls) == 2
     assert responses.calls[0]["text"]["format"]["type"] == "json_schema"
     assert "did not satisfy the required schema" in responses.calls[1]["input"]
+
+
+def _openai_call(**overrides) -> TextGenerationCall:
+    payload: dict = {"model": "gpt-5.1", "user_prompt": "hello"}
+    payload.update(overrides)
+    return TextGenerationCall(**payload)
+
+
+def _openai_kwargs(call: TextGenerationCall, *, streaming: bool = False) -> dict:
+    provider = OpenAITextProvider(client=SimpleNamespace())
+    return provider._request_kwargs(call, streaming=streaming)
+
+
+def test_openai_omitted_temperature_forwards_0_7() -> None:
+    kwargs = _openai_kwargs(_openai_call())
+    assert kwargs["temperature"] == 0.7
+
+
+def test_openai_numeric_temperature_is_forwarded_exactly() -> None:
+    assert _openai_kwargs(_openai_call(temperature=0.2))["temperature"] == 0.2
+
+
+def test_openai_zero_temperature_is_forwarded() -> None:
+    assert _openai_kwargs(_openai_call(temperature=0.0))["temperature"] == 0.0
+
+
+def test_openai_none_temperature_omits_provider_field() -> None:
+    kwargs = _openai_kwargs(_openai_call(temperature=None))
+    assert "temperature" not in kwargs
+
+
+def test_openai_stream_none_temperature_omits_provider_field() -> None:
+    kwargs = _openai_kwargs(_openai_call(temperature=None), streaming=True)
+    assert "temperature" not in kwargs
+
+
+def test_openai_stream_numeric_temperature_is_forwarded() -> None:
+    assert _openai_kwargs(_openai_call(temperature=0.2), streaming=True)["temperature"] == 0.2
+
+
+@pytest.mark.asyncio
+async def test_openai_generate_omits_temperature_when_none() -> None:
+    responses = _FakeResponses([_sdk_response(text="ok")])
+    provider = OpenAITextProvider(client=SimpleNamespace(responses=responses))
+    await provider.generate(_openai_call(temperature=None))
+    assert "temperature" not in responses.calls[0]
+    assert responses.calls[0]["model"] == "gpt-5.1"
