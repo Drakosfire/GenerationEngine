@@ -178,6 +178,23 @@ async def test_transport_and_conformance_retries_are_distinguishable() -> None:
 
 
 @pytest.mark.asyncio
+async def test_repair_preserves_explicit_none_temperature() -> None:
+    provider = ScriptedText(
+        [
+            _result(text="not-json", parsed=None),
+            _result(),
+        ]
+    )
+    client = GenerationClient(text_provider=provider)
+    result = await client.generate_structured(_request(temperature=None))
+    assert result.parsed == {"name": "ok", "count": 1}
+    assert len(provider.calls) == 2
+    assert provider.calls[0].temperature is None
+    assert provider.calls[1].temperature is None
+    assert result.observation.conformance_retry_count == 1
+
+
+@pytest.mark.asyncio
 async def test_repair_shares_overall_deadline(monkeypatch) -> None:
     sleeps: list[float] = []
 

@@ -296,3 +296,114 @@ async def test_openrouter_stream_exception_is_failed_with_openrouter_identity() 
     assert events[0].failure.message == "Provider request failed."
     assert events[0].observation.provider == "openrouter"
     assert "sk-or" not in events[0].failure.message
+
+
+@pytest.mark.asyncio
+async def test_openrouter_omitted_temperature_forwards_0_7() -> None:
+    completions = _FakeCompletions()
+    provider = _provider_with_completions(completions)
+    await provider.generate(
+        TextGenerationCall(model="deepseek/deepseek-v4.1-flash", user_prompt="hello")
+    )
+    assert completions.calls[0]["temperature"] == 0.7
+
+
+@pytest.mark.asyncio
+async def test_openrouter_none_temperature_omits_provider_field() -> None:
+    completions = _FakeCompletions()
+    provider = _provider_with_completions(completions)
+    await provider.generate(
+        TextGenerationCall(
+            model="deepseek/deepseek-v4.1-flash",
+            user_prompt="hello",
+            temperature=None,
+        )
+    )
+    assert "temperature" not in completions.calls[0]
+
+
+@pytest.mark.asyncio
+async def test_openrouter_zero_temperature_is_forwarded() -> None:
+    completions = _FakeCompletions()
+    provider = _provider_with_completions(completions)
+    await provider.generate(
+        TextGenerationCall(
+            model="deepseek/deepseek-v4.1-flash",
+            user_prompt="hello",
+            temperature=0.0,
+        )
+    )
+    assert completions.calls[0]["temperature"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_openrouter_stream_none_temperature_omits_provider_field() -> None:
+    captured: dict[str, object] = {}
+
+    class StreamCompletions:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+
+            async def _chunks():
+                yield SimpleNamespace(
+                    id="chatcmpl-or",
+                    _request_id="req-or",
+                    model="deepseek/deepseek-v4.1-flash",
+                    usage=None,
+                    choices=[SimpleNamespace(delta=SimpleNamespace(content="hi"), finish_reason="stop")],
+                )
+
+            return _chunks()
+
+    provider = OpenRouterTextProvider(
+        client=SimpleNamespace(chat=SimpleNamespace(completions=StreamCompletions()))
+    )
+    events = [
+        event
+        async for event in provider.stream(
+            TextGenerationCall(
+                model="deepseek/deepseek-v4.1-flash",
+                user_prompt="hello",
+                temperature=None,
+            )
+        )
+    ]
+    assert captured["stream"] is True
+    assert "temperature" not in captured
+    assert isinstance(events[-1], TextCompleted)
+
+
+@pytest.mark.asyncio
+async def test_openrouter_stream_numeric_temperature_is_forwarded() -> None:
+    captured: dict[str, object] = {}
+
+    class StreamCompletions:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+
+            async def _chunks():
+                yield SimpleNamespace(
+                    id="chatcmpl-or",
+                    _request_id="req-or",
+                    model="deepseek/deepseek-v4.1-flash",
+                    usage=None,
+                    choices=[SimpleNamespace(delta=SimpleNamespace(content="hi"), finish_reason="stop")],
+                )
+
+            return _chunks()
+
+    provider = OpenRouterTextProvider(
+        client=SimpleNamespace(chat=SimpleNamespace(completions=StreamCompletions()))
+    )
+    events = [
+        event
+        async for event in provider.stream(
+            TextGenerationCall(
+                model="deepseek/deepseek-v4.1-flash",
+                user_prompt="hello",
+                temperature=0.2,
+            )
+        )
+    ]
+    assert captured["temperature"] == 0.2
+    assert isinstance(events[-1], TextCompleted)

@@ -66,6 +66,18 @@ Embeddings, transcription, speech, and moderation are out of this contract until
 
 Hosting remains in-process. A network GenerationEngine service is not part of E2.
 
+### Text temperature
+
+`TextRequest.temperature` and `TextGenerationCall.temperature` are `float | None` and default to `0.7`. The three states are distinct:
+
+```text
+omitted field     existing GenerationEngine default 0.7; provider receives 0.7
+explicit number   forward that exact numeric value, including 0.0
+explicit None     omit the provider temperature field; provider/model default owns sampling
+```
+
+This applies to ordinary text, structured text, structured repair, and streaming for OpenAI and OpenRouter. A structured corrective attempt inherits the original request temperature unchanged. GenerationEngine does not invent a provider-specific default temperature.
+
 ---
 
 ## 2. Provider boundary

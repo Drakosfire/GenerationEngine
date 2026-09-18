@@ -117,8 +117,9 @@ class OpenRouterTextProvider:
         kwargs: dict[str, Any] = {
             "model": call.model,
             "messages": messages,
-            "temperature": call.temperature,
         }
+        if call.temperature is not None:
+            kwargs["temperature"] = call.temperature
         if streaming:
             kwargs["stream"] = True
         return kwargs

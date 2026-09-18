@@ -26,7 +26,7 @@ class TextRequest(BaseModel):
     profile: InferenceProfile | None = None
     provider: str | None = None
     model: str | None = None
-    temperature: float = 0.7
+    temperature: float | None = 0.7
     json_schema: dict[str, Any] | None = None
     schema_name: str | None = None
     deadline_ms: int | None = Field(

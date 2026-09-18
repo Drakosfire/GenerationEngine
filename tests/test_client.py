@@ -484,6 +484,86 @@ async def test_stream_duplicate_provider_terminal_emits_one() -> None:
     assert terminals[0].failure.message == "Provider request failed."
 
 
+class RecordingTextProvider(FakeTextProvider):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.received: list[TextGenerationCall] = []
+
+    async def generate(self, call: TextGenerationCall) -> TextGenerationResult:
+        self.received.append(call)
+        return await super().generate(call)
+
+
+def test_omitted_temperature_defaults_to_0_7() -> None:
+    request = TextRequest(user_prompt="x", profile=InferenceProfile.TEXT_FAST)
+    assert request.temperature == 0.7
+    call = TextGenerationCall(model="gpt-5.1", user_prompt="x")
+    assert call.temperature == 0.7
+
+
+def test_explicit_none_temperature_is_preserved_on_request() -> None:
+    request = TextRequest(
+        user_prompt="x",
+        profile=InferenceProfile.TEXT_FAST,
+        temperature=None,
+    )
+    assert request.temperature is None
+    call = TextGenerationCall(model="gpt-5.1", user_prompt="x", temperature=None)
+    assert call.temperature is None
+
+
+@pytest.mark.asyncio
+async def test_omitted_temperature_reaches_provider_as_0_7() -> None:
+    provider = RecordingTextProvider()
+    client = GenerationClient(text_provider=provider)
+    await client.generate_text(TextRequest(user_prompt="hi", profile=InferenceProfile.TEXT_FAST))
+    assert provider.received[0].temperature == 0.7
+
+
+@pytest.mark.asyncio
+async def test_explicit_numeric_temperature_reaches_provider() -> None:
+    provider = RecordingTextProvider()
+    client = GenerationClient(text_provider=provider)
+    await client.generate_text(
+        TextRequest(user_prompt="hi", profile=InferenceProfile.TEXT_FAST, temperature=0.2)
+    )
+    assert provider.received[0].temperature == 0.2
+
+
+@pytest.mark.asyncio
+async def test_explicit_none_temperature_reaches_provider_call() -> None:
+    provider = RecordingTextProvider()
+    client = GenerationClient(text_provider=provider)
+    await client.generate_text(
+        TextRequest(user_prompt="hi", profile=InferenceProfile.TEXT_FAST, temperature=None)
+    )
+    assert provider.received[0].temperature is None
+
+
+@pytest.mark.asyncio
+async def test_zero_temperature_is_numeric_not_missing() -> None:
+    provider = RecordingTextProvider()
+    client = GenerationClient(text_provider=provider)
+    await client.generate_text(
+        TextRequest(user_prompt="hi", profile=InferenceProfile.TEXT_FAST, temperature=0.0)
+    )
+    assert provider.received[0].temperature == 0.0
+
+
+@pytest.mark.asyncio
+async def test_stream_explicit_none_temperature_reaches_provider_call() -> None:
+    provider = RecordingTextProvider()
+    client = GenerationClient(text_provider=provider)
+    events = [
+        event
+        async for event in client.stream_text(
+            TextRequest(user_prompt="hi", profile=InferenceProfile.TEXT_FAST, temperature=None)
+        )
+    ]
+    assert provider.received[0].temperature is None
+    assert any(isinstance(event, TextCompleted) for event in events)
+
+
 def test_map_provider_exception_does_not_leak_exception_text() -> None:
     from generationengine.client import _map_provider_exception
 
