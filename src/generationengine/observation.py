@@ -34,7 +34,11 @@ class ObservationState(str, Enum):
 
 
 class InferenceObservation(BaseModel):
-    """One GenerationEngine provider operation."""
+    """One GenerationEngine inference operation.
+
+    Structured generation may include multiple provider requests (transport
+    retries and at most one conformance repair) under this same observation.
+    """
 
     provider: str | None = None
     requested_profile: str | None = None

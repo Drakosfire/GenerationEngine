@@ -50,6 +50,7 @@ def _result(**kwargs) -> TextGenerationResult:
         "text": '{"name":"ok","count":1}',
         "parsed": {"name": "ok", "count": 1},
         "provider_request_id": "req",
+        "provider_response_id": "resp",
         "response_model": "model",
         "input_tokens": 10,
         "cached_input_tokens": 0,
@@ -118,8 +119,22 @@ async def test_non_native_invalid_then_valid_json() -> None:
 async def test_persistent_invalid_output_is_structured_invalid() -> None:
     provider = ScriptedText(
         [
-            _result(text="{", parsed=None),
-            _result(text='{"name":1}', parsed=None),
+            _result(
+                text="{",
+                parsed=None,
+                provider_request_id="req-1",
+                provider_response_id="resp-1",
+                input_tokens=3,
+                output_tokens=1,
+            ),
+            _result(
+                text='{"name":1}',
+                parsed=None,
+                provider_request_id="req-2",
+                provider_response_id="resp-2",
+                input_tokens=4,
+                output_tokens=2,
+            ),
         ]
     )
     client = GenerationClient(text_provider=provider)
@@ -129,6 +144,12 @@ async def test_persistent_invalid_output_is_structured_invalid() -> None:
     assert exc.value.observation.state is ObservationState.INCOMPLETE
     assert exc.value.observation.conformance_retry_count == 1
     assert exc.value.observation.provider_attempt_count == 2
+    assert exc.value.observation.provider_request_id == "req-2"
+    assert exc.value.observation.provider_response_id == "resp-2"
+    assert exc.value.observation.response_model == "model"
+    assert exc.value.observation.input_tokens == 7
+    assert exc.value.observation.cached_input_tokens == 0
+    assert exc.value.observation.output_tokens == 3
     dumped = exc.value.observation.model_dump()
     assert "user_prompt" not in dumped
     assert "prompt" not in dumped
@@ -333,3 +354,70 @@ async def test_recovered_retry_known_usage_is_included_in_aggregate() -> None:
     assert result.observation.cached_input_tokens == 0
     assert result.observation.output_tokens == 3
     assert result.observation.cost_usd is None
+
+
+@pytest.mark.asyncio
+async def test_invalid_caller_schema_is_invalid_request_without_provider_call() -> None:
+    provider = ScriptedText([])
+    client = GenerationClient(text_provider=provider)
+    with pytest.raises(GenerationEngineError) as exc:
+        await client.generate_structured(
+            _request(json_schema={"type": "not-a-schema-type"})
+        )
+    assert exc.value.failure.code is FailureCode.INVALID_REQUEST
+    assert exc.value.observation.provider_attempt_count == 0
+    assert exc.value.observation.retry_count == 0
+    assert provider.calls == []
+
+
+@pytest.mark.asyncio
+async def test_correction_rate_limit_unknown_input_keeps_other_aggregates(
+    monkeypatch,
+) -> None:
+    sleeps: list[float] = []
+
+    async def _no_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr("generationengine.client.asyncio.sleep", _no_sleep)
+    provider = ScriptedText(
+        [
+            _result(
+                text="nope",
+                parsed=None,
+                input_tokens=10,
+                cached_input_tokens=0,
+                output_tokens=1,
+                provider_request_id="req-1",
+                provider_response_id="resp-1",
+            ),
+            ProviderError.from_code(
+                FailureCode.RATE_LIMITED,
+                cached_input_tokens=0,
+                output_tokens=0,
+            ),
+            _result(
+                input_tokens=20,
+                cached_input_tokens=0,
+                output_tokens=2,
+                provider_request_id="req-3",
+                provider_response_id="resp-3",
+            ),
+        ]
+    )
+    client = GenerationClient(text_provider=provider)
+    result = await client.generate_structured(_request(deadline_ms=10_000))
+    assert result.parsed == {"name": "ok", "count": 1}
+    assert result.observation.provider_attempt_count == 3
+    assert result.observation.retry_count == 1
+    assert result.observation.transport_retry_count == 1
+    assert result.observation.conformance_retry_count == 1
+    assert result.observation.input_tokens is None
+    assert result.observation.cached_input_tokens == 0
+    assert result.observation.output_tokens == 3
+    assert result.observation.cost_usd is None
+    assert result.observation.provider_request_id == "req-3"
+    assert result.observation.provider_response_id == "resp-3"
+    assert result.observation.response_model == "model"
+    assert sleeps == [0.5]
+    assert "," not in (result.observation.provider_request_id or "")

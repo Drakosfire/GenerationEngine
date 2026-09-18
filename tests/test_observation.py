@@ -89,3 +89,7 @@ def test_observation_model_has_no_prompt_payload_fields() -> None:
     field_names = set(InferenceObservation.model_fields)
     overlap = field_names & FORBIDDEN_OBSERVATION_FIELDS
     assert overlap == set()
+    assert "retry_count" in InferenceObservation.model_fields
+    assert "transport_retry_count" in InferenceObservation.model_fields
+    assert "conformance_retry_count" in InferenceObservation.model_fields
+    assert "provider_attempt_count" in InferenceObservation.model_fields
