@@ -1,6 +1,6 @@
 # E5H — provider-neutral text output token ceiling
 
-**Status:** ACTIVE
+**Status:** MERGED — GenerationEngine PR #8 at `f502c9883013d3ec9b866ca9276dfd7def141599`
 **Architecture owner:** `Drakosfire/DungeonOverMind`
 **Execution repository:** `Drakosfire/GenerationEngine`
 **Canonical design:** DungeonOverMind `Docs/Plans/HANDOFF-E5H-generationengine-text-output-token-ceiling.md` at `17697a6723165f29f264d7cc203c9d2870bcd687`
@@ -9,6 +9,9 @@
 **PR topology:** `serial`
 **Assigned branch:** `codex/e5h-text-output-token-ceiling`
 **Assigned PR title:** `E5H: add provider-neutral text output token ceiling`
+**Final reviewed head:** `bdcaad5c400c32d9f813decc88cfa2fd3840fd78`
+**Review cycles:** 2
+**Accepted evidence:** focused contract/provider 94 passed; full provider-free 125 passed; Python 3.11/3.13 CI green; build/wheel import/lock/sync/Ruff/diff-check green
 
 ## Mission
 
