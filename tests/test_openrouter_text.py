@@ -136,6 +136,45 @@ async def test_openrouter_text_request_omits_response_format() -> None:
         )
     )
     assert "response_format" not in completions.calls[0]
+    assert "max_completion_tokens" not in completions.calls[0]
+
+
+def test_openrouter_none_output_ceiling_omits_provider_field() -> None:
+    provider = OpenRouterTextProvider(client=SimpleNamespace())
+    kwargs = provider._request_kwargs(
+        TextGenerationCall(
+            model="deepseek/deepseek-v4.1-flash",
+            user_prompt="hello",
+            max_output_tokens=None,
+        )
+    )
+    assert "max_completion_tokens" not in kwargs
+
+
+def test_openrouter_output_ceiling_maps_to_completion_tokens() -> None:
+    provider = OpenRouterTextProvider(client=SimpleNamespace())
+    kwargs = provider._request_kwargs(
+        TextGenerationCall(
+            model="deepseek/deepseek-v4.1-flash",
+            user_prompt="hello",
+            max_output_tokens=400,
+        )
+    )
+    assert kwargs["max_completion_tokens"] == 400
+
+
+def test_openrouter_stream_output_ceiling_maps_to_completion_tokens() -> None:
+    provider = OpenRouterTextProvider(client=SimpleNamespace())
+    kwargs = provider._request_kwargs(
+        TextGenerationCall(
+            model="deepseek/deepseek-v4.1-flash",
+            user_prompt="hello",
+            max_output_tokens=400,
+        ),
+        streaming=True,
+    )
+    assert kwargs["max_completion_tokens"] == 400
+    assert kwargs["stream"] is True
 
 
 @pytest.mark.asyncio
@@ -181,12 +220,14 @@ async def test_client_openrouter_generate_structured_uses_conformance() -> None:
                 "required": ["name", "count"],
                 "additionalProperties": False,
             },
+            max_output_tokens=400,
         )
     )
     assert result.parsed == {"name": "ok", "count": 1}
     assert result.observation.provider == "openrouter"
     assert result.observation.conformance_retry_count == 0
     assert completions.calls
+    assert completions.calls[0]["max_completion_tokens"] == 400
 
 
 @pytest.mark.asyncio

@@ -138,6 +138,7 @@ async def test_openai_adapter_malformed_json_is_repaired_by_conformance() -> Non
             profile=InferenceProfile.STRUCTURED_LOW_COST,
             json_schema=schema,
             schema_name="fixture",
+            max_output_tokens=400,
         )
     )
     assert result.parsed == {"name": "ok", "count": 1}
@@ -148,6 +149,7 @@ async def test_openai_adapter_malformed_json_is_repaired_by_conformance() -> Non
     assert result.observation.input_tokens == 16
     assert result.observation.output_tokens == 3
     assert len(responses.calls) == 2
+    assert [call["max_output_tokens"] for call in responses.calls] == [400, 400]
     assert responses.calls[0]["text"]["format"]["type"] == "json_schema"
     assert "did not satisfy the required schema" in responses.calls[1]["input"]
 
@@ -188,6 +190,20 @@ def test_openai_stream_none_temperature_omits_provider_field() -> None:
 
 def test_openai_stream_numeric_temperature_is_forwarded() -> None:
     assert _openai_kwargs(_openai_call(temperature=0.2), streaming=True)["temperature"] == 0.2
+
+
+def test_openai_none_output_ceiling_omits_provider_field() -> None:
+    kwargs = _openai_kwargs(_openai_call(max_output_tokens=None))
+    assert "max_output_tokens" not in kwargs
+
+
+def test_openai_output_ceiling_is_forwarded_exactly() -> None:
+    assert _openai_kwargs(_openai_call(max_output_tokens=400))["max_output_tokens"] == 400
+
+
+def test_openai_stream_output_ceiling_is_forwarded_exactly() -> None:
+    kwargs = _openai_kwargs(_openai_call(max_output_tokens=400), streaming=True)
+    assert kwargs["max_output_tokens"] == 400
 
 
 @pytest.mark.asyncio
