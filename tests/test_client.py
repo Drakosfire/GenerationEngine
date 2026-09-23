@@ -32,9 +32,11 @@ class FakeTextProvider:
         self.errors = list(errors or [])
         self.stream_events = stream_events
         self.calls = 0
+        self.seen_calls: list[TextGenerationCall] = []
 
     async def generate(self, call: TextGenerationCall) -> TextGenerationResult:
         self.calls += 1
+        self.seen_calls.append(call)
         if self.errors:
             raise self.errors.pop(0)
         if self.results:
@@ -98,6 +100,107 @@ def test_profile_resolution_preserves_cutover_models() -> None:
         model="gpt-4o",
     )
     assert explicit.catalog_id == "gpt-4o"
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_text_output_token_ceiling_rejects_non_positive_values(value: int) -> None:
+    with pytest.raises(ValueError):
+        TextRequest(user_prompt="hi", max_output_tokens=value)
+    with pytest.raises(ValueError):
+        TextGenerationCall(model="gpt-5.1", user_prompt="hi", max_output_tokens=value)
+
+
+def test_text_output_token_ceiling_defaults_to_none() -> None:
+    assert TextRequest(user_prompt="hi").max_output_tokens is None
+    assert TextGenerationCall(model="gpt-5.1", user_prompt="hi").max_output_tokens is None
+
+
+@pytest.mark.asyncio
+async def test_text_output_token_ceiling_reaches_provider_unchanged() -> None:
+    provider = FakeTextProvider()
+    client = GenerationClient(text_provider=provider)
+    await client.generate_text(
+        TextRequest(
+            user_prompt="hi",
+            profile=InferenceProfile.TEXT_FAST,
+            max_output_tokens=400,
+        )
+    )
+    assert [call.max_output_tokens for call in provider.seen_calls] == [400]
+
+
+@pytest.mark.asyncio
+async def test_omitted_output_token_ceiling_reaches_provider_as_none() -> None:
+    provider = FakeTextProvider()
+    client = GenerationClient(text_provider=provider)
+    await client.generate_text(
+        TextRequest(user_prompt="hi", profile=InferenceProfile.TEXT_FAST)
+    )
+    assert [call.max_output_tokens for call in provider.seen_calls] == [None]
+
+
+@pytest.mark.asyncio
+async def test_transport_retry_preserves_output_token_ceiling() -> None:
+    provider = FakeTextProvider(
+        errors=[ProviderError.from_code(FailureCode.RATE_LIMITED, "slow")],
+        results=[TextGenerationResult(text="recovered")],
+    )
+    client = GenerationClient(text_provider=provider)
+    await client.generate_text(
+        TextRequest(
+            user_prompt="hi",
+            profile=InferenceProfile.TEXT_FAST,
+            max_output_tokens=400,
+        )
+    )
+    assert [call.max_output_tokens for call in provider.seen_calls] == [400, 400]
+
+
+@pytest.mark.asyncio
+async def test_structured_repair_preserves_output_token_ceiling() -> None:
+    class RepairProvider(FakeTextProvider):
+        async def generate(self, call: TextGenerationCall) -> TextGenerationResult:
+            self.calls += 1
+            self.seen_calls.append(call)
+            if self.calls == 1:
+                return TextGenerationResult(text="not-json", parsed=None)
+            return TextGenerationResult(text='{"name":"ok"}', parsed=None)
+
+    provider = RepairProvider()
+    client = GenerationClient(text_provider=provider)
+    result = await client.generate_structured(
+        TextRequest(
+            user_prompt="hi",
+            profile=InferenceProfile.STRUCTURED_LOW_COST,
+            json_schema={
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+                "additionalProperties": False,
+            },
+            max_output_tokens=400,
+        )
+    )
+    assert result.parsed == {"name": "ok"}
+    assert [call.max_output_tokens for call in provider.seen_calls] == [400, 400]
+
+
+@pytest.mark.asyncio
+async def test_stream_preserves_output_token_ceiling() -> None:
+    provider = FakeTextProvider()
+    client = GenerationClient(text_provider=provider)
+    events = [
+        event
+        async for event in client.stream_text(
+            TextRequest(
+                user_prompt="hi",
+                profile=InferenceProfile.TEXT_FAST,
+                max_output_tokens=400,
+            )
+        )
+    ]
+    assert isinstance(events[-1], TextCompleted)
+    assert [call.max_output_tokens for call in provider.seen_calls] == [400]
 
 
 def test_unsupported_model_capability() -> None:

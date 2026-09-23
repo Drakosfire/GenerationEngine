@@ -23,6 +23,7 @@ class TextGenerationCall(BaseModel):
     user_prompt: str
     system_prompt: str | None = None
     temperature: float | None = 0.7
+    max_output_tokens: int | None = Field(default=None, ge=1)
     json_schema: dict[str, Any] | None = None
     schema_name: str | None = None
 

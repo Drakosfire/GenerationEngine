@@ -120,6 +120,8 @@ class OpenRouterTextProvider:
         }
         if call.temperature is not None:
             kwargs["temperature"] = call.temperature
+        if call.max_output_tokens is not None:
+            kwargs["max_completion_tokens"] = call.max_output_tokens
         if streaming:
             kwargs["stream"] = True
         return kwargs
