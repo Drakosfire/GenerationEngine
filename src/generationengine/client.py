@@ -557,6 +557,7 @@ def _text_call(
         user_prompt=request.user_prompt if user_prompt is None else user_prompt,
         system_prompt=request.system_prompt,
         temperature=request.temperature,
+        max_output_tokens=request.max_output_tokens,
         json_schema=request.json_schema,
         schema_name=request.schema_name,
     )

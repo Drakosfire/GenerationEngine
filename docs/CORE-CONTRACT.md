@@ -78,6 +78,29 @@ explicit None     omit the provider temperature field; provider/model default ow
 
 This applies to ordinary text, structured text, structured repair, and streaming for OpenAI and OpenRouter. A structured corrective attempt inherits the original request temperature unchanged. GenerationEngine does not invent a provider-specific default temperature.
 
+### Text output-token ceiling
+
+`TextRequest.max_output_tokens` and `TextGenerationCall.max_output_tokens` are
+provider-neutral `int | None` fields with a minimum value of 1 and a default of
+`None`:
+
+```text
+omitted / None      send no provider output-token ceiling
+positive integer N  request exactly N maximum generated output tokens
+zero / negative     invalid request
+```
+
+The exact caller value applies to ordinary text, structured text, structured
+repair attempts, transport retries, and streaming. GenerationEngine does not
+invent a numeric default, expand the ceiling for repair, or truncate output
+locally. Provider adapters own wire vocabulary: OpenAI Responses receives
+`max_output_tokens`, while OpenRouter Chat Completions receives
+`max_completion_tokens`.
+
+The requested ceiling is configuration, not measured usage, and is therefore
+not part of `InferenceObservation`. Actual provider-reported `output_tokens`
+remains observation truth.
+
 ---
 
 ## 2. Provider boundary
