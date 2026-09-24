@@ -177,6 +177,50 @@ def test_openrouter_stream_output_ceiling_maps_to_completion_tokens() -> None:
     assert kwargs["stream"] is True
 
 
+def test_openrouter_false_json_object_omits_response_format() -> None:
+    provider = OpenRouterTextProvider(client=SimpleNamespace())
+    kwargs = provider._request_kwargs(
+        TextGenerationCall(
+            model="deepseek/deepseek-v4.1-flash",
+            user_prompt="hello",
+            json_object=False,
+        )
+    )
+    assert "response_format" not in kwargs
+
+
+def test_openrouter_json_object_maps_to_response_format_and_composes_controls() -> None:
+    provider = OpenRouterTextProvider(client=SimpleNamespace())
+    kwargs = provider._request_kwargs(
+        TextGenerationCall(
+            model="deepseek/deepseek-v4.1-flash",
+            user_prompt="hello",
+            json_object=True,
+            temperature=0.2,
+            max_output_tokens=400,
+        )
+    )
+    assert kwargs["response_format"] == {"type": "json_object"}
+    assert kwargs["temperature"] == 0.2
+    assert kwargs["max_completion_tokens"] == 400
+
+
+@pytest.mark.asyncio
+async def test_openrouter_json_object_success_remains_raw_text() -> None:
+    completions = _FakeCompletions(response=_chat_response(text="{not-json"))
+    provider = _provider_with_completions(completions)
+    result = await provider.generate(
+        TextGenerationCall(
+            model="deepseek/deepseek-v4.1-flash",
+            user_prompt="hello",
+            json_object=True,
+        )
+    )
+    assert completions.calls[0]["response_format"] == {"type": "json_object"}
+    assert result.text == "{not-json"
+    assert result.parsed is None
+
+
 @pytest.mark.asyncio
 async def test_openrouter_structured_uses_json_instruction_not_native_schema() -> None:
     completions = _FakeCompletions(response=_chat_response(text='{"name":"x","count":1}'))

@@ -115,6 +115,125 @@ def test_text_output_token_ceiling_defaults_to_none() -> None:
     assert TextGenerationCall(model="gpt-5.1", user_prompt="hi").max_output_tokens is None
 
 
+def test_json_object_mode_defaults_to_false() -> None:
+    assert TextRequest(user_prompt="hi").json_object is False
+    assert TextGenerationCall(model="gpt-5.1", user_prompt="hi").json_object is False
+
+
+@pytest.mark.asyncio
+async def test_json_object_mode_reaches_provider_and_returns_raw_text() -> None:
+    provider = FakeTextProvider(
+        results=[
+            TextGenerationResult(
+                text='{"name":"raw"}',
+                parsed={"provider": "must not cross the JSON-object boundary"},
+            )
+        ]
+    )
+    client = GenerationClient(text_provider=provider)
+    result = await client.generate_text(
+        TextRequest(
+            user_prompt="hi",
+            profile=InferenceProfile.TEXT_FAST,
+            json_object=True,
+        )
+    )
+    assert provider.seen_calls[0].json_object is True
+    assert result.text == '{"name":"raw"}'
+    assert result.parsed is None
+
+
+@pytest.mark.asyncio
+async def test_json_object_mode_returns_malformed_json_without_repair() -> None:
+    provider = FakeTextProvider(
+        results=[TextGenerationResult(text="{not-json", parsed=None)]
+    )
+    client = GenerationClient(text_provider=provider)
+    result = await client.generate_text(
+        TextRequest(
+            user_prompt="hi",
+            profile=InferenceProfile.TEXT_FAST,
+            json_object=True,
+        )
+    )
+    assert result.text == "{not-json"
+    assert result.parsed is None
+    assert provider.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_json_object_mode_transport_retry_preserves_request() -> None:
+    provider = FakeTextProvider(
+        errors=[ProviderError.from_code(FailureCode.RATE_LIMITED, "slow")],
+        results=[TextGenerationResult(text="{}", parsed=None)],
+    )
+    client = GenerationClient(text_provider=provider)
+    await client.generate_text(
+        TextRequest(
+            user_prompt="hi",
+            profile=InferenceProfile.TEXT_FAST,
+            json_object=True,
+        )
+    )
+    assert [call.json_object for call in provider.seen_calls] == [True, True]
+
+
+@pytest.mark.asyncio
+async def test_json_object_and_schema_reject_before_provider_execution() -> None:
+    provider = FakeTextProvider()
+    client = GenerationClient(text_provider=provider)
+    with pytest.raises(GenerationEngineError) as exc:
+        await client.generate_text(
+            TextRequest(
+                user_prompt="hi",
+                profile=InferenceProfile.TEXT_FAST,
+                json_object=True,
+                json_schema={"type": "object"},
+            )
+        )
+    assert exc.value.failure.code is FailureCode.INVALID_REQUEST
+    assert exc.value.observation.provider_attempt_count == 0
+    assert provider.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_generate_structured_rejects_json_object_before_provider_execution() -> None:
+    provider = FakeTextProvider()
+    client = GenerationClient(text_provider=provider)
+    with pytest.raises(GenerationEngineError) as exc:
+        await client.generate_structured(
+            TextRequest(
+                user_prompt="hi",
+                profile=InferenceProfile.STRUCTURED_LOW_COST,
+                json_object=True,
+                json_schema={"type": "object"},
+            )
+        )
+    assert exc.value.failure.code is FailureCode.INVALID_REQUEST
+    assert exc.value.observation.provider_attempt_count == 0
+    assert provider.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_stream_rejects_json_object_before_provider_execution() -> None:
+    provider = FakeTextProvider()
+    client = GenerationClient(text_provider=provider)
+    events = [
+        event
+        async for event in client.stream_text(
+            TextRequest(
+                user_prompt="hi",
+                profile=InferenceProfile.TEXT_FAST,
+                json_object=True,
+            )
+        )
+    ]
+    assert len(events) == 1
+    assert isinstance(events[0], TextFailed)
+    assert events[0].failure.code is FailureCode.INVALID_REQUEST
+    assert provider.calls == 0
+
+
 @pytest.mark.asyncio
 async def test_text_output_token_ceiling_reaches_provider_unchanged() -> None:
     provider = FakeTextProvider()
