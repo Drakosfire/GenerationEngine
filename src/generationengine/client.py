@@ -115,9 +115,27 @@ class GenerationClient:
         return self._image
 
     async def generate_text(self, request: TextRequest) -> TextResult:
+        if request.json_object and request.json_schema is not None:
+            raise _config_error(
+                InferenceFailure.from_code(
+                    FailureCode.INVALID_REQUEST,
+                    "json_object and json_schema are mutually exclusive.",
+                ),
+                request=request,
+                provider_attempt_count=0,
+            )
         return await self._generate_text(request, capability=Capability.TEXT)
 
     async def generate_structured(self, request: TextRequest) -> TextResult:
+        if request.json_object:
+            raise _config_error(
+                InferenceFailure.from_code(
+                    FailureCode.INVALID_REQUEST,
+                    "generate_structured does not accept json_object mode.",
+                ),
+                request=request,
+                provider_attempt_count=0,
+            )
         if not request.json_schema:
             raise _config_error(
                 InferenceFailure.from_code(
@@ -143,6 +161,16 @@ class GenerationClient:
     async def stream_text(self, request: TextRequest) -> AsyncIterator[TextStreamEvent]:
         """Yield deltas, then exactly one terminal. Streaming does not retry."""
         started = time.monotonic()
+        if request.json_object:
+            yield _stream_failure(
+                failure=InferenceFailure.from_code(
+                    FailureCode.INVALID_REQUEST,
+                    "stream_text does not accept json_object mode.",
+                ),
+                request=request,
+                started=started,
+            )
+            return
         deadline_s = _deadline_s(request.deadline_ms)
         resolution = None
         try:
@@ -318,7 +346,11 @@ class GenerationClient:
                     }
                 ),
             )
-        return TextResult(text=result.text, parsed=result.parsed, observation=observation)
+        return TextResult(
+            text=result.text,
+            parsed=None if request.json_object else result.parsed,
+            observation=observation,
+        )
 
     async def _generate_structured(self, request: TextRequest) -> TextResult:
         started = time.monotonic()
@@ -558,6 +590,7 @@ def _text_call(
         system_prompt=request.system_prompt,
         temperature=request.temperature,
         max_output_tokens=request.max_output_tokens,
+        json_object=request.json_object,
         json_schema=request.json_schema,
         schema_name=request.schema_name,
     )

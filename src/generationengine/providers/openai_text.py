@@ -118,7 +118,9 @@ class OpenAITextProvider:
             kwargs["max_output_tokens"] = call.max_output_tokens
         if call.system_prompt:
             kwargs["instructions"] = call.system_prompt
-        if call.json_schema and not streaming:
+        if call.json_object:
+            kwargs["text"] = {"format": {"type": "json_object"}}
+        elif call.json_schema and not streaming:
             kwargs["text"] = {
                 "format": {
                     "type": "json_schema",
