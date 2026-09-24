@@ -1,6 +1,6 @@
 # E5J — schema-less JSON-object mode
 
-**Status:** ACTIVE
+**Status:** MERGED — GenerationEngine PR #9 at `7f5c94f7fc24051cd62595f836b2db4105d68d50`
 **Architecture owner:** `Drakosfire/DungeonOverMind`
 **Execution repository:** `Drakosfire/GenerationEngine`
 **Design authority:** attached canonical handoff `HANDOFF-E5J-generationengine-json-object-mode.md`
@@ -8,6 +8,9 @@
 **PR topology:** `serial`
 **Assigned branch:** `codex/e5j-json-object-mode`
 **Assigned PR title:** `E5J: add schema-less JSON-object mode`
+**Final reviewed head:** `2889eb9dba28b36fe7a536dfe2576a65f5d3afe3`
+**Review cycles:** 2
+**Accepted evidence:** focused 107 passed; full 138 passed; Python 3.11/3.13 CI green; build/wheel import/Ruff/lock/diff-check green
 
 ## Mission
 
