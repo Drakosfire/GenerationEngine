@@ -32,6 +32,10 @@ class TextRequest(BaseModel):
         ge=1,
         description="Optional maximum number of generated output tokens for this text operation.",
     )
+    json_object: bool = Field(
+        default=False,
+        description="Request a provider-native JSON object without schema validation or parsing.",
+    )
     json_schema: dict[str, Any] | None = None
     schema_name: str | None = None
     deadline_ms: int | None = Field(

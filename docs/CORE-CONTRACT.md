@@ -101,6 +101,28 @@ The requested ceiling is configuration, not measured usage, and is therefore
 not part of `InferenceObservation`. Actual provider-reported `output_tokens`
 remains observation truth.
 
+### Schema-less JSON-object mode
+
+`TextRequest.json_object` and `TextGenerationCall.json_object` are
+provider-neutral booleans that default to `False`. When true on ordinary
+`generate_text()`, GE asks the provider for a valid JSON object but returns the
+provider's raw text with `TextResult.parsed` remaining `None`. Products retain
+parsing, domain validation, and fallback ownership; GE performs no local parse
+or conformance repair for this mode.
+
+Provider adapters map the generic request to their native wire controls:
+
+```text
+OpenAI Responses  text.format = {"type": "json_object"}
+OpenRouter Chat   response_format = {"type": "json_object"}
+```
+
+False omits those controls and preserves existing request shapes.
+`json_object=True` is mutually exclusive with `json_schema`, and streaming
+JSON-object mode is not supported; both combinations fail with
+`INVALID_REQUEST` before provider execution. `generate_structured()` remains
+the JSON Schema validation and conformance-repair API.
+
 ---
 
 ## 2. Provider boundary

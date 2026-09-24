@@ -206,6 +206,34 @@ def test_openai_stream_output_ceiling_is_forwarded_exactly() -> None:
     assert kwargs["max_output_tokens"] == 400
 
 
+def test_openai_false_json_object_omits_format() -> None:
+    kwargs = _openai_kwargs(_openai_call(json_object=False))
+    assert "text" not in kwargs
+
+
+def test_openai_json_object_maps_to_responses_format_and_composes_controls() -> None:
+    kwargs = _openai_kwargs(
+        _openai_call(
+            json_object=True,
+            temperature=0.2,
+            max_output_tokens=400,
+        )
+    )
+    assert kwargs["text"] == {"format": {"type": "json_object"}}
+    assert kwargs["temperature"] == 0.2
+    assert kwargs["max_output_tokens"] == 400
+
+
+@pytest.mark.asyncio
+async def test_openai_json_object_success_remains_raw_text() -> None:
+    responses = _FakeResponses([_sdk_response(text="{not-json")])
+    provider = OpenAITextProvider(client=SimpleNamespace(responses=responses))
+    result = await provider.generate(_openai_call(json_object=True))
+    assert responses.calls[0]["text"] == {"format": {"type": "json_object"}}
+    assert result.text == "{not-json"
+    assert result.parsed is None
+
+
 @pytest.mark.asyncio
 async def test_openai_generate_omits_temperature_when_none() -> None:
     responses = _FakeResponses([_sdk_response(text="ok")])
