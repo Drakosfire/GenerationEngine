@@ -61,11 +61,58 @@ class GenerationClient:
         if text_provider is not None:
             self._text_providers.setdefault("openai", text_provider)
         self._image = image_provider
+        self._closed = False
 
     @classmethod
     def from_env(cls) -> GenerationClient:
         """Construct providers from extras/env. Missing extras fail at first use."""
         return cls()
+
+    async def aclose(self) -> None:
+        """Close all instantiated provider resources once and make this client terminal."""
+        if self._closed:
+            return
+        self._closed = True
+
+        providers = [*self._text_providers.values()]
+        if self._image is not None:
+            providers.append(self._image)
+
+        first_error: Exception | None = None
+        seen: set[int] = set()
+        for provider in providers:
+            identity = id(provider)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            close = getattr(provider, "aclose", None)
+            if not callable(close):
+                continue
+            try:
+                await close()
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+
+        if first_error is not None:
+            raise first_error
+
+    def _ensure_open(
+        self,
+        *,
+        request: TextRequest | None = None,
+        image: ImageRequest | None = None,
+    ) -> None:
+        if self._closed:
+            raise _config_error(
+                InferenceFailure.from_code(
+                    FailureCode.INVALID_REQUEST,
+                    "GenerationClient is closed.",
+                ),
+                request=request,
+                image=image,
+                provider_attempt_count=0,
+            )
 
     def _text_provider_for(self, provider_id: str) -> TextProvider:
         key = provider_id.strip().lower()
@@ -115,6 +162,7 @@ class GenerationClient:
         return self._image
 
     async def generate_text(self, request: TextRequest) -> TextResult:
+        self._ensure_open(request=request)
         if request.json_object and request.json_schema is not None:
             raise _config_error(
                 InferenceFailure.from_code(
@@ -127,6 +175,7 @@ class GenerationClient:
         return await self._generate_text(request, capability=Capability.TEXT)
 
     async def generate_structured(self, request: TextRequest) -> TextResult:
+        self._ensure_open(request=request)
         if request.json_object:
             raise _config_error(
                 InferenceFailure.from_code(
@@ -161,6 +210,17 @@ class GenerationClient:
     async def stream_text(self, request: TextRequest) -> AsyncIterator[TextStreamEvent]:
         """Yield deltas, then exactly one terminal. Streaming does not retry."""
         started = time.monotonic()
+        if self._closed:
+            yield _stream_failure(
+                failure=InferenceFailure.from_code(
+                    FailureCode.INVALID_REQUEST,
+                    "GenerationClient is closed.",
+                ),
+                request=request,
+                started=started,
+                provider_attempt_count=0,
+            )
+            return
         if request.json_object:
             yield _stream_failure(
                 failure=InferenceFailure.from_code(
@@ -274,9 +334,11 @@ class GenerationClient:
             await _aclose_stream(stream)
 
     async def generate_image(self, request: ImageRequest) -> ImageResult:
+        self._ensure_open(image=request)
         return await self._generate_image(request, capability=Capability.IMAGE)
 
     async def edit_image(self, request: ImageRequest) -> ImageResult:
+        self._ensure_open(image=request)
         if not request.base_image_base64 and not request.source_image_url:
             raise _config_error(
                 InferenceFailure.from_code(
@@ -774,6 +836,7 @@ def _stream_failure(
     resolution=None,
     provider: str | None = None,
     result: ProviderError | None = None,
+    provider_attempt_count: int | None = None,
 ) -> TextFailed:
     return TextFailed(
         failure=failure,
@@ -785,6 +848,7 @@ def _stream_failure(
             retry_count=0,
             result=result,
             provider=provider,
+            provider_attempt_count=provider_attempt_count,
         ),
     )
 

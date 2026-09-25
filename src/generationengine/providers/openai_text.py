@@ -39,6 +39,9 @@ class OpenAITextProvider:
             )
         self._client = AsyncOpenAI(api_key=key, max_retries=0)
 
+    async def aclose(self) -> None:
+        await self._client.close()
+
     async def generate(self, call: TextGenerationCall) -> TextGenerationResult:
         kwargs = self._request_kwargs(call)
         try:

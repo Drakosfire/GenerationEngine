@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import AsyncIterator
 
 import pytest
@@ -11,6 +12,7 @@ from generationengine import (
     FailureCode,
     GenerationClient,
     GenerationEngineError,
+    ImageRequest,
     InferenceProfile,
     ObservationState,
     TextCompleted,
@@ -79,6 +81,141 @@ class FakeImageProvider:
     async def generate(self, **kwargs) -> list[bytes]:
         self.calls += 1
         return list(self.blobs)
+
+
+class CloseableProvider(FakeTextProvider):
+    def __init__(self, *, close_error: Exception | None = None) -> None:
+        super().__init__()
+        self.close_error = close_error
+        self.close_calls = 0
+
+    async def aclose(self) -> None:
+        self.close_calls += 1
+        if self.close_error is not None:
+            raise self.close_error
+
+
+def test_aclose_is_async() -> None:
+    assert inspect.iscoroutinefunction(GenerationClient.aclose)
+
+
+@pytest.mark.asyncio
+async def test_aclose_unused_lazy_client_constructs_no_provider() -> None:
+    client = GenerationClient.from_env()
+
+    await client.aclose()
+
+    assert client._text_providers == {}
+    assert client._image is None
+
+
+@pytest.mark.asyncio
+async def test_aclose_closes_unique_provider_once_and_is_idempotent() -> None:
+    provider = CloseableProvider()
+    client = GenerationClient(
+        text_provider=provider,
+        text_providers={"openrouter": provider},
+        image_provider=provider,
+    )
+
+    await client.aclose()
+    await client.aclose()
+
+    assert provider.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_aclose_skips_provider_without_async_close() -> None:
+    provider = FakeTextProvider()
+    client = GenerationClient(text_provider=provider)
+
+    await client.aclose()
+
+    assert provider.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_aclose_attempts_all_providers_and_reraises_first_error() -> None:
+    first_error = RuntimeError("first close failed")
+    first = CloseableProvider(close_error=first_error)
+    second = CloseableProvider(close_error=ValueError("second close failed"))
+    last = CloseableProvider()
+    client = GenerationClient(
+        text_providers={"openai": first, "openrouter": second},
+        image_provider=last,
+    )
+
+    with pytest.raises(RuntimeError) as exc:
+        await client.aclose()
+
+    assert exc.value is first_error
+    assert [first.close_calls, second.close_calls, last.close_calls] == [1, 1, 1]
+    await client.aclose()
+    assert [first.close_calls, second.close_calls, last.close_calls] == [1, 1, 1]
+    with pytest.raises(GenerationEngineError) as inference_exc:
+        await client.generate_text(
+            TextRequest(user_prompt="hi", profile=InferenceProfile.TEXT_FAST)
+        )
+    assert inference_exc.value.failure.code is FailureCode.INVALID_REQUEST
+    assert inference_exc.value.observation.provider_attempt_count == 0
+    assert first.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_closed_client_rejects_text_structured_and_images_before_provider() -> None:
+    text = FakeTextProvider()
+    image = FakeImageProvider()
+    client = GenerationClient(text_provider=text, image_provider=image)
+    await client.aclose()
+
+    operations = (
+        client.generate_text(
+            TextRequest(user_prompt="hi", profile=InferenceProfile.TEXT_FAST)
+        ),
+        client.generate_structured(
+            TextRequest(
+                user_prompt="hi",
+                profile=InferenceProfile.STRUCTURED_LOW_COST,
+                json_schema={"type": "object"},
+            )
+        ),
+        client.generate_image(ImageRequest(prompt="map", model="gpt-image-1.5")),
+        client.edit_image(
+            ImageRequest(
+                prompt="map",
+                model="gpt-image-1.5",
+                base_image_base64="aW1hZ2U=",
+            )
+        ),
+    )
+    for operation in operations:
+        with pytest.raises(GenerationEngineError) as exc:
+            await operation
+        assert exc.value.failure.code is FailureCode.INVALID_REQUEST
+        assert exc.value.observation.provider_attempt_count == 0
+
+    assert text.calls == 0
+    assert image.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_closed_client_stream_yields_one_invalid_terminal_without_provider_call() -> None:
+    provider = FakeTextProvider()
+    client = GenerationClient(text_provider=provider)
+    await client.aclose()
+
+    events = [
+        event
+        async for event in client.stream_text(
+            TextRequest(user_prompt="hi", profile=InferenceProfile.TEXT_FAST)
+        )
+    ]
+
+    assert len(events) == 1
+    assert isinstance(events[0], TextFailed)
+    assert events[0].failure.code is FailureCode.INVALID_REQUEST
+    assert events[0].observation.provider_attempt_count == 0
+    assert provider.calls == 0
 
 
 def test_profile_resolution_preserves_cutover_models() -> None:

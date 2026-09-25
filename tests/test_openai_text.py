@@ -10,6 +10,23 @@ from generationengine.providers.base import TextGenerationCall
 from generationengine.providers.openai_text import OpenAITextProvider, _ids_from_response
 
 
+@pytest.mark.asyncio
+async def test_openai_adapter_closes_underlying_async_sdk_client_once_per_call() -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.close_calls = 0
+
+        async def close(self) -> None:
+            self.close_calls += 1
+
+    client = FakeClient()
+    provider = OpenAITextProvider(client=client)
+
+    await provider.aclose()
+
+    assert client.close_calls == 1
+
+
 def test_openai_client_disables_sdk_retries(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
