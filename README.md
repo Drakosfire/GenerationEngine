@@ -9,8 +9,7 @@ GenerationEngine owns inference execution and inference-call truth. Products own
 | [docs/CURRENT-STATE.md](docs/CURRENT-STATE.md) | Implemented public surface |
 | [docs/CORE-CONTRACT.md](docs/CORE-CONTRACT.md) | Capabilities, profiles, observations, failures |
 | [docs/STRUCTURED-CONFORMANCE.md](docs/STRUCTURED-CONFORMANCE.md) | Adopted structured-generation refinement |
-| [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) | Deleted vs current API |
-| [docs/E2-SUCCESSOR-SLICES.md](docs/E2-SUCCESSOR-SLICES.md) | E2 sequence |
+| [docs/README.md](docs/README.md) | Documentation authority/index |
 
 ## Installation
 
@@ -26,14 +25,17 @@ Text through OpenAI requires `OPENAI_API_KEY`. Text through OpenRouter requires 
 from generationengine import GenerationClient, InferenceProfile, TextRequest
 
 client = GenerationClient.from_env()
-result = await client.generate_text(
-    TextRequest(
-        user_prompt="What is a statblock?",
-        profile=InferenceProfile.TEXT_FAST,
+try:
+    result = await client.generate_text(
+        TextRequest(
+            user_prompt="What is a statblock?",
+            profile=InferenceProfile.TEXT_FAST,
+        )
     )
-)
-print(result.text)
-print(result.observation.resolved_model)
+    print(result.text)
+    print(result.observation.resolved_model)
+finally:
+    await client.aclose()
 ```
 
 Explicit provider+model targets do not require a catalog row. The named provider must be registered:
@@ -64,7 +66,9 @@ result = await client.generate_structured(
 print(result.parsed)
 ```
 
-`generate_structured()` performs GenerationEngine-owned local schema validation. OpenAI native JSON Schema is an optimization, not the contract; see [docs/STRUCTURED-CONFORMANCE.md](docs/STRUCTURED-CONFORMANCE.md). OpenRouter uses JSON instructions rather than native `json_schema`. Labs that need provider-specific routing/reasoning knobs GE cannot express may still use a bounded direct path.
+`generate_structured()` performs GenerationEngine-owned local schema validation and at most one structural repair. OpenAI native JSON Schema is an optimization, not the contract; see [docs/STRUCTURED-CONFORMANCE.md](docs/STRUCTURED-CONFORMANCE.md). OpenRouter uses JSON instructions rather than native `json_schema`.
+
+Ordinary text also supports provider-neutral `max_output_tokens` and schema-less `json_object=True`. JSON-object mode returns raw text with `parsed=None`; products retain parsing/domain/fallback ownership. Labs that need provider-specific controls GE cannot express may still use a bounded direct path.
 
 Image generation returns bytes. Products publish artifacts:
 
