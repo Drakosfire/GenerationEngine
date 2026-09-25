@@ -1,6 +1,6 @@
 # Structured conformance
 
-**Status:** IMPLEMENTED IN E5B.1 — local validation and one bounded structural repair  
+**Status:** ACTIVE ADOPTED DECISION — local validation and one bounded structural repair  
 **Date:** 2026-09-16  
 **Related:** `CORE-CONTRACT.md` §8 Structured output
 
