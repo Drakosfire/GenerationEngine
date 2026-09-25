@@ -447,7 +447,7 @@ ImageResult
   observation        InferenceObservation
 ```
 
-Durable publication is outside the inference core.
+GenerationEngine returns inference content to the product; durable publication is outside the inference core.
 
 Topology:
 
