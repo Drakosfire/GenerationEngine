@@ -1,52 +1,134 @@
 # GenerationEngine current state
 
-**Branch:** `e5/structured-conformance`  
+**Status:** current `main` implementation reference  
 **Contract:** [CORE-CONTRACT.md](CORE-CONTRACT.md)  
-**Structured-conformance refinement:** [STRUCTURED-CONFORMANCE.md](STRUCTURED-CONFORMANCE.md)  
-**Consumer inventory:** [COMPATIBILITY.md](COMPATIBILITY.md)
+**Structured conformance:** [STRUCTURED-CONFORMANCE.md](STRUCTURED-CONFORMANCE.md)
+
+## Public execution surface
 
 ```text
-public API: GenerationClient
+GenerationClient
   generate_text
-  generate_structured   # GE local schema validation + at most one structural repair
+  generate_structured
   stream_text
   generate_image
   edit_image
-text dispatch: openai, openrouter (by provider identity)
-openrouter structured: JSON instructions, not native json_schema
-live adapters: OpenAITextProvider, OpenRouterTextProvider, FalProvider
-observations: InferenceObservation on success and failure
-  retry_count = transport retries
-  conformance_retry_count = structured repairs
-  provider_attempt_count = all provider generate calls
-failures: FailureCode / GenerationEngineError (no SDK types)
-image results: bytes only; no Cloudflare, no URLs
-catalog: selection/metadata authority for profile defaults and governed model IDs
-explicit targets: provider + model may execute without a LIVE_MODELS row
-deleted: TextGenerationService, ImageService, UploadService, MetricsService,
-         TextModel, ImageModel, MODEL_PRICING, generationengine.models,
-         generationengine.services
+  aclose
 ```
 
-Image publication, product prompts, schema definitions/domain meaning, and action→profile mapping belong to products.
+Public request/result/failure/observation types are exported from `generationengine`.
 
-Labs should prefer GenerationEngine explicit targets when the experiment fits the generic contract. A bounded lab-only direct provider path remains allowed when GenerationEngine cannot yet express a required control; that path must not become a production seam.
+## Text execution
 
-## Structured generation status
+Registered text providers:
 
-`generate_structured()` implements the provider-independent structured-conformance contract in [STRUCTURED-CONFORMANCE.md](STRUCTURED-CONFORMANCE.md).
+- `openai` → OpenAI Responses adapter;
+- `openrouter` → OpenRouter Chat Completions adapter.
+
+Selection supports:
+
+- governed profile/catalog resolution;
+- explicit `provider + model` execution without requiring a catalog row.
+
+`TextRequest.temperature` semantics:
 
 ```text
-caller supplies JSON Schema
-→ GenerationEngine chooses provider-specific structured strategy
-→ GenerationEngine parses locally
-→ GenerationEngine validates locally against the schema
-→ GenerationEngine performs at most one corrective inference retry when needed
-→ return schema-conforming parsed object OR STRUCTURED_OUTPUT_INVALID
+omitted          GE default 0.7
+explicit number  forward exact value, including 0.0
+explicit None    omit provider field; provider/model default owns sampling
 ```
 
-Provider-native strict schema, JSON-object modes, and prompt/instruction steering are implementation strategies, not the public semantic definition of `generate_structured()`.
+`TextRequest.max_output_tokens`:
 
-Products retain domain/business/evidence validation. GenerationEngine owns only structural conformance required to fulfill the inference request.
+```text
+None / omitted   no provider ceiling
+positive int     exact provider-neutral output-token ceiling
+<= 0             invalid before provider execution
+```
 
-Consumers may still contain domain/evidence validation and, until migrated, leftover structural parse/repair loops. Those loops are migration sources, not the desired steady state.
+Provider adapters translate the generic ceiling into provider-native wire vocabulary. GE does not locally truncate text.
+
+### Schema-less JSON-object mode
+
+Ordinary `generate_text()` supports `json_object=True`.
+
+```text
+provider asked for JSON object
+→ raw provider text returned
+→ TextResult.parsed remains None
+→ no local JSON parse/schema validation/repair
+```
+
+Products own parsing/domain validation/fallback for this mode.
+
+`json_object=True` is incompatible with `json_schema`, and JSON-object streaming is rejected before provider execution.
+
+## Structured generation
+
+`generate_structured()` implements provider-independent structural conformance:
+
+```text
+caller JSON Schema
+→ provider-specific generation strategy
+→ GE local JSON parse
+→ GE local JSON Schema validation
+→ at most one structural corrective inference retry
+→ parsed schema-conforming object OR normalized failure
+```
+
+Provider-native strict-schema support is an optimization, not the semantic contract.
+
+Products retain domain/business/evidence validation.
+
+## Streaming
+
+`stream_text()` is transport-neutral and yields deltas followed by exactly one terminal event. Streaming does not perform transport retry. Unsupported/invalid requests return a failed terminal rather than provider execution.
+
+## Images
+
+Fal-backed image generation/editing returns bytes through `ImageResult`.
+
+GenerationEngine does not publish artifacts, upload to Cloudflare, or return product URLs.
+
+## Observations and failures
+
+`InferenceObservation` records inference-call truth across success/failure:
+
+- provider/requested/resolved/response model IDs;
+- provider request/response IDs when known;
+- input/cached/output token usage when known;
+- cost when known;
+- operation latency;
+- transport retry count;
+- structured conformance retry count;
+- provider attempt count;
+- normalized state/failure code.
+
+Unknown values remain `None`; they are not invented as zero.
+
+Public failures use `GenerationEngineError` + normalized `InferenceFailure` / `FailureCode`, never provider SDK exceptions.
+
+## Client lifecycle
+
+`await GenerationClient.aclose()` is terminal and idempotent.
+
+It:
+
+- closes instantiated closeable providers once;
+- does not construct lazy providers just to close them;
+- attempts all instantiated providers even if one close fails, then re-raises the first cleanup error;
+- causes later inference to fail with `INVALID_REQUEST` before provider execution.
+
+Built-in OpenAI/OpenRouter adapters close their underlying async SDK clients.
+
+## Current limitations / intentional boundaries
+
+- no product-specific generation methods;
+- no Agent runtime;
+- no network GenerationEngine service;
+- no artifact publication/storage;
+- no embeddings/transcription/speech/moderation contract yet;
+- no JSON-object streaming;
+- provider-specific experimental controls not represented by the generic contract may require a bounded lab-only direct path.
+
+Deleted E2-era facades and cutover details are historical under `docs/archive/`.
