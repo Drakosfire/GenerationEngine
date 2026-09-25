@@ -1,4 +1,4 @@
-"""Normalized inference-call observation (E2A contract, E2B type).
+"""Normalized inference-call observation.
 
 This is inference-call truth, not a product trace. Unknown values are None.
 Zero means the provider supplied zero. Full prompts and responses are not fields.
