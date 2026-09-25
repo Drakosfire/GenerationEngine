@@ -1,8 +1,7 @@
-# GenerationEngine core contract (target)
+# GenerationEngine core contract
 
-**Status:** Coordinated cutover implemented. Live execution is `GenerationClient` over OpenAI, OpenRouter, and Fal adapters.  
-**Current behavior:** [CURRENT-STATE.md](CURRENT-STATE.md)  
-**Cutover inventory:** [COMPATIBILITY.md](COMPATIBILITY.md)
+**Status:** IMPLEMENTED — live execution is `GenerationClient` over OpenAI, OpenRouter, and Fal adapters.  
+**Current behavior:** [CURRENT-STATE.md](CURRENT-STATE.md)
 
 GenerationEngine is an in-process inference capability. It is not a product backend, not a network service, and not an Agent runtime.
 
@@ -64,7 +63,7 @@ Do not add methods named `generate_statblock`, `generate_card`, `generate_map`, 
 
 Embeddings, transcription, speech, and moderation are out of this contract until an explicit ownership decision adds them.
 
-Hosting remains in-process. A network GenerationEngine service is not part of E2.
+Hosting remains in-process. A network GenerationEngine service is not part of the current contract.
 
 ### Text temperature
 
@@ -157,7 +156,7 @@ After the provider reset:
 
 OpenRouter remains `provider=openrouter` even when the adapter reuses an OpenAI-compatible Python SDK or request shape.
 
-`ImageProvider` already exists as a protocol. E2B adds `TextProvider`. The coordinated cutover moves live OpenAI/Fal execution behind these seams. E5B adds OpenRouter as a registered text provider and dispatches text calls by provider identity.
+`TextProvider` and `ImageProvider` are the live provider protocols. OpenAI/OpenRouter text and Fal image execution run behind these seams. Text dispatch uses provider identity.
 
 ---
 
@@ -244,7 +243,7 @@ pricing             # dimensions + version/source identifier
 availability        # available / deprecated / unknown
 ```
 
-E2A does not populate a complete production catalog. E2B lands the authority and shape. Later slices fill rows required by wired providers.
+The catalog is intentionally incomplete: it contains only governed rows needed for reusable resolution/metadata. Explicit provider+model targets do not require catalog membership.
 
 Unknown catalog fields are omitted or marked unknown. They are not invented as zero.
 
