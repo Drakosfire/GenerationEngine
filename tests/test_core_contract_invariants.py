@@ -155,3 +155,41 @@ def test_built_wheel_imports_without_provider_extras(tmp_path: Path) -> None:
         text=True,
     )
     assert result.returncode == 0
+
+CURRENT_STATE = REPO_ROOT / "docs" / "CURRENT-STATE.md"
+DOCS_INDEX = REPO_ROOT / "docs" / "README.md"
+DOCUMENTATION_AUDIT = REPO_ROOT / "docs" / "Reports" / "REPORT-document-authority-audit-2026-09-25.md"
+
+
+def test_current_documentation_authority_shape() -> None:
+    required = (
+        REPO_ROOT / "README.md",
+        DOCS_INDEX,
+        CONTRACT,
+        CURRENT_STATE,
+        REPO_ROOT / "docs" / "STRUCTURED-CONFORMANCE.md",
+        DOCUMENTATION_AUDIT,
+    )
+    forbidden_active = (
+        REPO_ROOT / "docs" / "COMPATIBILITY.md",
+        REPO_ROOT / "docs" / "E2-SUCCESSOR-SLICES.md",
+        REPO_ROOT / "docs" / "HANDOFF-E5H-generationengine-text-output-token-ceiling.md",
+        REPO_ROOT / "docs" / "HANDOFF-E5J-generationengine-json-object-mode.md",
+    )
+
+    for path in required:
+        assert path.is_file(), f"missing current documentation authority: {path.relative_to(REPO_ROOT)}"
+        assert path.stat().st_size > 0, f"empty current documentation authority: {path.relative_to(REPO_ROOT)}"
+
+    for path in forbidden_active:
+        assert not path.exists(), f"historical transition doc returned to active root: {path.relative_to(REPO_ROOT)}"
+
+
+def test_current_contract_docs_do_not_claim_future_cutover_state() -> None:
+    core = CONTRACT.read_text(encoding="utf-8")
+    current = CURRENT_STATE.read_text(encoding="utf-8")
+    index = DOCS_INDEX.read_text(encoding="utf-8")
+
+    assert "core contract (target)" not in core
+    assert "Branch: `e5/structured-conformance`" not in current
+    assert "The next contract refinement is provider-independent structured conformance" not in index
