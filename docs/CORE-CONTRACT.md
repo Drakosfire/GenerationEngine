@@ -123,6 +123,20 @@ JSON-object mode is not supported; both combinations fail with
 `INVALID_REQUEST` before provider execution. `generate_structured()` remains
 the JSON Schema validation and conformance-repair API.
 
+### Client lifecycle
+
+`await GenerationClient.aclose()` deterministically releases resources owned by
+providers already instantiated on that client. Cleanup is terminal and
+idempotent: unique closeable provider objects are closed once, lazy providers
+are not constructed merely for cleanup, and later inference fails with
+`INVALID_REQUEST` before provider execution.
+
+Cleanup attempts every instantiated provider even if an earlier close fails,
+then re-raises the first cleanup exception unchanged. Cleanup errors are not
+inference failures and do not create observations. Built-in OpenAI and
+OpenRouter text adapters delegate cleanup to their underlying async SDK
+clients.
+
 ---
 
 ## 2. Provider boundary
