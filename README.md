@@ -41,29 +41,37 @@ finally:
 Explicit provider+model targets do not require a catalog row. The named provider must be registered:
 
 ```python
-result = await client.generate_text(
-    TextRequest(
-        user_prompt="Summarize this scene",
-        provider="openrouter",
-        model="deepseek/deepseek-v4.1-flash",
+client = GenerationClient.from_env()
+try:
+    result = await client.generate_text(
+        TextRequest(
+            user_prompt="Summarize this scene",
+            provider="openrouter",
+            model="deepseek/deepseek-v4.1-flash",
+        )
     )
-)
-print(result.observation.provider)
-print(result.observation.resolved_model)
+    print(result.observation.provider)
+    print(result.observation.resolved_model)
+finally:
+    await client.aclose()
 ```
 
 Structured generation:
 
 ```python
-result = await client.generate_structured(
-    TextRequest(
-        user_prompt="Generate a creature named Bob",
-        profile=InferenceProfile.STRUCTURED_HIGH_RELIABILITY,
-        json_schema=schema,
-        schema_name="Creature",
+client = GenerationClient.from_env()
+try:
+    result = await client.generate_structured(
+        TextRequest(
+            user_prompt="Generate a creature named Bob",
+            profile=InferenceProfile.STRUCTURED_HIGH_RELIABILITY,
+            json_schema=schema,
+            schema_name="Creature",
+        )
     )
-)
-print(result.parsed)
+    print(result.parsed)
+finally:
+    await client.aclose()
 ```
 
 `generate_structured()` performs GenerationEngine-owned local schema validation and at most one structural repair. OpenAI native JSON Schema is an optimization, not the contract; see [docs/STRUCTURED-CONFORMANCE.md](docs/STRUCTURED-CONFORMANCE.md). OpenRouter uses JSON instructions rather than native `json_schema`.
@@ -75,14 +83,18 @@ Image generation returns bytes. Products publish artifacts:
 ```python
 from generationengine import ImageRequest
 
-images = await client.generate_image(
-    ImageRequest(
-        prompt="A mystical dragon in a forest",
-        profile=InferenceProfile.IMAGE_HIGH_QUALITY,
-        model="gpt-image-1.5",
+client = GenerationClient.from_env()
+try:
+    images = await client.generate_image(
+        ImageRequest(
+            prompt="A mystical dragon in a forest",
+            profile=InferenceProfile.IMAGE_HIGH_QUALITY,
+            model="gpt-image-1.5",
+        )
     )
-)
-png_bytes = images.images[0].content
+    png_bytes = images.images[0].content
+finally:
+    await client.aclose()
 ```
 
 ## Environment variables
