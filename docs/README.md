@@ -11,6 +11,7 @@ Load the smallest document needed:
 - [CORE-CONTRACT.md](CORE-CONTRACT.md) — public semantic contract and ownership boundary.
 - [CURRENT-STATE.md](CURRENT-STATE.md) — implemented providers/capabilities/current limitations.
 - [STRUCTURED-CONFORMANCE.md](STRUCTURED-CONFORMANCE.md) — adopted structured-generation semantics.
+- [Reports/REPORT-document-authority-audit-2026-09-25.md](Reports/REPORT-document-authority-audit-2026-09-25.md) — documentation cleanup/placement evidence.
 
 Root [README.md](../README.md) is the usage entry point.
 
