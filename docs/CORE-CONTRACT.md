@@ -377,7 +377,7 @@ data: ...\n\n
 [ERROR]
 ```
 
-Target event kinds:
+Public event kinds:
 
 ```text
 TextDelta(text)
@@ -405,7 +405,7 @@ duplicate provider terminal
 
 Product backends translate those events into SSE, WebSocket, CLI, or other transports.
 
-E2A found no DungeonMindServer caller of legacy `generate_stream`. The coordinated cutover replaces SSE framing with these transport-neutral events and deletes the old streaming surface.
+Legacy SSE-framing helpers are not part of the public core. Product backends translate the transport-neutral events above into their own delivery protocol.
 
 ---
 
@@ -420,7 +420,7 @@ E2A found no DungeonMindServer caller of legacy `generate_stream`. The coordinat
 - Result shape: text content, optional parsed object, observation, optional failure. Parsed data is not a product domain type inside the engine.
 - Tests use a domain-neutral schema (for example a `{name: str, count: int}` fixture), never MapSpec/statblock/card models.
 
-Current E5B.1 implementation:
+Current implementation:
 
 - `generate_structured()` always performs GenerationEngine-owned local JSON Schema validation before success.
 - OpenAI may submit provider-native JSON Schema as a provider-specific optimization. Adapters return raw text; GE owns parse, local validation, and bounded repair.
@@ -434,19 +434,22 @@ Current E5B.1 implementation:
 
 GenerationEngine returns generated image content. It does not require Cloudflare, R2, or any durable store to execute image generation or editing.
 
-Target result:
+Current result shape:
 
 ```text
 GeneratedImage
-  content            bytes | controlled temporary / provider reference
+  content            bytes
   media_type         e.g. image/png
   width / height     when known
+
+ImageResult
+  images             list[GeneratedImage]
   observation        InferenceObservation
 ```
 
-Exact bytes-vs-reference representation may account for memory cost, but durable publication is outside the inference core.
+Durable publication is outside the inference core.
 
-Target topology:
+Topology:
 
 ```text
 GenerationEngine
