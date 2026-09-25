@@ -1,4 +1,4 @@
-"""Public package surface after the E2 cutover."""
+"""Current public package surface."""
 
 from __future__ import annotations
 
