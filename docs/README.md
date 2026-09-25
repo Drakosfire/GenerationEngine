@@ -1,17 +1,71 @@
 # GenerationEngine documentation
 
-**Status:** The E2 GenerationEngine cutover is implemented and accepted by Settling Gate G. `GenerationClient` owns live provider execution, images return bytes, and product publication is outside the inference core.
+GenerationEngine is the **in-process, provider-agnostic inference-execution library** for DungeonMind products.
 
-The next contract refinement is provider-independent structured conformance: products own schema definition/domain meaning; GenerationEngine owns making inference output conform structurally to the caller-supplied schema.
+It owns generic inference execution and inference-call truth. Products own prompt/task meaning, product schemas/domain validation, workflow/orchestration, authorization/quotas, and artifact persistence/publication.
 
-| Document | Purpose |
-| --- | --- |
-| [CURRENT-STATE.md](CURRENT-STATE.md) | Implemented package surface, current limitations, and execution behavior |
-| [CORE-CONTRACT.md](CORE-CONTRACT.md) | Product-neutral inference contract established during E2 |
-| [STRUCTURED-CONFORMANCE.md](STRUCTURED-CONFORMANCE.md) | Adopted refinement of structured generation: local schema validation, bounded corrective inference retries, and ownership boundary |
-| [COMPATIBILITY.md](COMPATIBILITY.md) | Consumer inventory for the flag-day cutover, not an API-support promise |
-| [E2-SUCCESSOR-SLICES.md](E2-SUCCESSOR-SLICES.md) | Historical E2B vs coordinated cutover sequencing |
+## Active authority
 
-When `CORE-CONTRACT.md` §8 is read, `STRUCTURED-CONFORMANCE.md` is the adopted refinement: provider-native strict-schema features are implementation strategies, not the semantic definition of `generate_structured()`.
+Load the smallest document needed:
 
-Architecture authority for ecosystem ownership remains in DungeonOverMind.
+- [CORE-CONTRACT.md](CORE-CONTRACT.md) — public semantic contract and ownership boundary.
+- [CURRENT-STATE.md](CURRENT-STATE.md) — implemented providers/capabilities/current limitations.
+- [STRUCTURED-CONFORMANCE.md](STRUCTURED-CONFORMANCE.md) — adopted structured-generation semantics.
+
+Root [README.md](../README.md) is the usage entry point.
+
+## Current settled capabilities
+
+Current `main` includes the accepted E2/E5 contract work through deterministic client cleanup:
+
+- `GenerationClient` public execution facade;
+- OpenAI/OpenRouter text and Fal image adapters;
+- explicit provider+model targets;
+- provider-default temperature via explicit `None`;
+- provider-neutral text output-token ceiling;
+- schema-less JSON-object ordinary text mode;
+- provider-independent structured conformance with bounded repair;
+- normalized observations/failures;
+- deterministic terminal `await GenerationClient.aclose()`.
+
+There is no active GenerationEngine implementation handoff in this repository at this revision.
+
+## Directory policy
+
+### Active docs
+
+Only current library contract/current-state/adopted decisions belong at `docs/` root.
+
+### `archive/`
+
+Completed E2/E5 handoffs, flag-day compatibility inventories, provider-migration notes, and other historical transition evidence.
+
+Archive content cannot override code/tests/current contract docs.
+
+## Authority rule
+
+For current behavior:
+
+```text
+public code/types/tests
+→ CORE-CONTRACT / CURRENT-STATE / adopted decision docs
+→ merged PR evidence
+→ archive / Git history
+```
+
+An old handoff that says READY/IN REVIEW is never current authority after its PR settles.
+
+## Ownership rule
+
+GenerationEngine may know:
+
+- provider/model identity and capability;
+- generic inference profiles;
+- retries/deadlines/provider wire translation;
+- structural output conformance;
+- normalized failures/usage/cost/latency/provider IDs;
+- provider-resource lifecycle.
+
+It must not know product concepts such as statblocks, campaigns, cards, Rules Lawyer, world objects, or Agent turns.
+
+Cross-repository ownership/sequencing authority remains in DungeonOverMind.
