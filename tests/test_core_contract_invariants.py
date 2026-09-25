@@ -1,7 +1,7 @@
-"""Target-contract fitness checks.
+"""Core-contract and documentation-authority fitness checks.
 
-These tests pin accepted design, not current defects. They must not require
-provider credentials or network access.
+These tests pin accepted public design and active authority. They must not
+require provider credentials or network access.
 """
 
 from __future__ import annotations
@@ -162,27 +162,28 @@ DOCUMENTATION_AUDIT = REPO_ROOT / "docs" / "Reports" / "REPORT-document-authorit
 
 
 def test_current_documentation_authority_shape() -> None:
-    required = (
-        REPO_ROOT / "README.md",
-        DOCS_INDEX,
+    required = {
+        REPO_ROOT / "docs" / "README.md",
         CONTRACT,
         CURRENT_STATE,
         REPO_ROOT / "docs" / "STRUCTURED-CONFORMANCE.md",
         DOCUMENTATION_AUDIT,
-    )
-    forbidden_active = (
-        REPO_ROOT / "docs" / "COMPATIBILITY.md",
-        REPO_ROOT / "docs" / "E2-SUCCESSOR-SLICES.md",
-        REPO_ROOT / "docs" / "HANDOFF-E5H-generationengine-text-output-token-ceiling.md",
-        REPO_ROOT / "docs" / "HANDOFF-E5J-generationengine-json-object-mode.md",
-    )
+    }
+    required_with_root = {REPO_ROOT / "README.md", *required}
 
-    for path in required:
+    for path in required_with_root:
         assert path.is_file(), f"missing current documentation authority: {path.relative_to(REPO_ROOT)}"
         assert path.stat().st_size > 0, f"empty current documentation authority: {path.relative_to(REPO_ROOT)}"
 
-    for path in forbidden_active:
-        assert not path.exists(), f"historical transition doc returned to active root: {path.relative_to(REPO_ROOT)}"
+    active_docs = {
+        path
+        for path in (REPO_ROOT / "docs").rglob("*")
+        if path.is_file() and "archive" not in path.relative_to(REPO_ROOT / "docs").parts
+    }
+    assert active_docs == required, (
+        "unexpected active docs outside the authority set: "
+        f"{sorted(str(path.relative_to(REPO_ROOT)) for path in active_docs ^ required)}"
+    )
 
 
 def test_current_contract_docs_do_not_claim_future_cutover_state() -> None:
