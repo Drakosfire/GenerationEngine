@@ -88,10 +88,10 @@ Developer-facing module docstrings were also stale and were corrected:
 
 ## Executable authority
 
-`tests/test_documentation_authority.py` now asserts:
+`tests/test_core_contract_invariants.py` now asserts:
 
-- current authority files exist and are non-empty;
-- settled E2/E5 handoffs/inventories do not return to the active docs root;
+- the exact active docs-root authority set exists and is non-empty;
+- extra active docs cannot silently accumulate outside that set;
 - current contract docs do not resurrect known stale future/feature-branch language.
 
 The existing repository CI already runs the full pytest suite on Python 3.11 and 3.13, so documentation authority is enforced through the normal test matrix rather than a separate documentation-only workflow.
@@ -116,3 +116,13 @@ completed migration handoffs
 ```
 
 Historical transition volume is acceptable. Competing active authority is not.
+
+
+## Final contract-drift corrections
+
+The final rigor sweep also corrected two active-document mismatches:
+
+- structured-conformance observation/retry language now describes the implemented counters rather than a future direction;
+- the image contract now matches current public types: `GeneratedImage` contains bytes/media/size while `ImageResult` owns the `InferenceObservation`.
+
+Streaming/core docs were also normalized from E2 migration narration to present-tense public semantics.
