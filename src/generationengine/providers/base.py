@@ -1,7 +1,6 @@
-"""Provider protocols for GenerationEngine.
+"""Provider-neutral execution protocols for GenerationEngine.
 
-These seams are for the coordinated cutover. E2B does not move live OpenAI/Fal
-execution behind them.
+Live provider SDKs stay behind these capability seams.
 """
 
 from __future__ import annotations
