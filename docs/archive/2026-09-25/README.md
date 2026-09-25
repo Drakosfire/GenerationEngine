@@ -41,3 +41,12 @@ The E5H and E5J handoff bodies are preserved here as implementation history. The
 ## Restore rule
 
 Do not move these files back to the active docs root merely for discoverability. If a behavior changes, update the active contract/current-state docs and tests; use this archive only for transition history.
+
+
+## Imported provider-history note
+
+The historical OpenAI Responses migration note imported from DungeonOverMind is consolidated here at:
+
+`historical-imports/LEARNINGS-OpenAI-Responses-API-Migration-2025.md`
+
+It predates the current public contract and remains migration history only.

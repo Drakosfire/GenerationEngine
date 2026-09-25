@@ -40,7 +40,7 @@ Moved out of the active docs root:
 
 Those files remain under `docs/archive/2026-09-25/transition/` with an archive ledger recording exact PR/merge evidence.
 
-Existing historical OpenAI Responses migration notes remain under `docs/archive/overmind-import-2026-09-24/` and are explicitly not current contract authority.
+Historical OpenAI Responses migration notes imported from DungeonOverMind are consolidated under `docs/archive/2026-09-25/historical-imports/` and are explicitly not current contract authority.
 
 ## PR truth reconciled
 
