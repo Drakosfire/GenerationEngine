@@ -1,8 +1,7 @@
-"""Target failure taxonomy for GenerationEngine.
+"""Public provider-neutral failure taxonomy for GenerationEngine.
 
-Current provider execution may still use ErrorCode / RetryableError during E2B.
-This module is the contract the coordinated cutover should emit. It is not an
-adapter that keeps both taxonomies alive.
+Provider SDK exception types stay behind adapters. Public execution exposes
+normalized InferenceFailure / FailureCode semantics.
 """
 
 from __future__ import annotations
