@@ -127,11 +127,9 @@ Do not inject product-domain judgments into GenerationEngine repair prompts.
 
 All attempts consume one overall caller-visible deadline/budget. Conformance retries must be bounded.
 
-## Observation direction
+## Observation accounting
 
-The current `InferenceObservation.retry_count` represents provider-operation retry behavior and is not sufficient to describe future structured repair accurately.
-
-The structured-conformance implementation should make the distinction observable. The exact public shape is implementation-owned, but it should preserve truthful concepts equivalent to:
+`InferenceObservation` exposes distinct counters for structured execution:
 
 ```text
 provider_attempt_count
@@ -139,7 +137,7 @@ transport_retry_count
 conformance_retry_count
 ```
 
-Usage, cost, and latency should represent the whole structured-generation operation where the provider supplies enough truth to aggregate them.
+Usage, cost, and latency represent the whole structured-generation operation where the provider supplies enough truth to aggregate them.
 
 Do not count a conformance repair as a transport retry.
 
@@ -161,9 +159,9 @@ Provider adapters must not overclaim structured support based only on OpenAI-com
 
 The bounded lab-direct path remains acceptable when GE cannot yet reproduce required provider-specific routing/reasoning controls without changing experiment semantics.
 
-## Migration consequence for consumers
+## Consumer consequence
 
-Once this contract is implemented and settled, consumer migrations should classify existing validation code:
+Consumers migrating onto this settled contract should classify existing validation code:
 
 ```text
 parse/schema/shape validation + model repair
@@ -175,9 +173,9 @@ domain/business/evidence validation
 
 Do not bulk-delete validation merely because it uses Pydantic or JSON. Ownership is determined by what is being validated, not the library used.
 
-## Acceptance tests
+## Contract witnesses
 
-The implementation should prove at least:
+The implementation/test suite proves or should continue to prove:
 
 1. native strict-schema provider path still receives final local validation;
 2. non-native JSON/text path can produce a schema-valid result through bounded correction;
