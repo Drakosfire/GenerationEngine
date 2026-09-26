@@ -124,7 +124,11 @@ def _questions(call: DecisionGenerationCall) -> dict[str, Any]:
         elif isinstance(question, ChoiceDecisionQuestion):
             questions[question.name] = Choice(
                 instructions=question.question,
-                criteria={label: None for label in question.options},
+                criteria={
+                    label: question.option_descriptions[label]
+                    if question.option_descriptions is not None else None
+                    for label in question.options
+                },
             )
         elif isinstance(question, ScoreDecisionQuestion):
             questions[question.name] = Score(

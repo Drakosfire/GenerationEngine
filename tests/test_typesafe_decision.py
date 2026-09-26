@@ -38,7 +38,8 @@ def request() -> DecisionRequest:
                 true_description="Relevant", false_description="Irrelevant",
             ),
             ChoiceDecisionQuestion(
-                name="category", question="Which category?", options=("a", "b")
+                name="category", question="Which category?", options=("a", "b"),
+                option_descriptions={"a": "First category", "b": "Second category"},
             ),
             ScoreDecisionQuestion(
                 name="strength", question="How strong?", levels=("low", "medium", "high")
@@ -89,6 +90,7 @@ async def test_three_question_families_and_truthful_gateway_observation():
     assert questions["yes"].criteria == {"true": "Relevant", "false": "Irrelevant"}
     assert isinstance(questions["category"], Choice)
     assert list(questions["category"].criteria) == ["a", "b"]
+    assert questions["category"].criteria == {"a": "First category", "b": "Second category"}
     assert isinstance(questions["strength"], Score)
     assert questions["strength"].criteria == ["low", "medium", "high"]
     assert result.answers["yes"].value is True
