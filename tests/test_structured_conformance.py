@@ -157,6 +157,37 @@ async def test_persistent_invalid_output_is_structured_invalid() -> None:
 
 
 @pytest.mark.asyncio
+async def test_incomplete_provider_error_stops_before_structured_repair() -> None:
+    provider = ScriptedText([
+        ProviderError.from_code(
+            FailureCode.PROVIDER_INCOMPLETE,
+            "partial raw output",
+            provider_request_id="req-incomplete",
+            provider_response_id="resp-incomplete",
+            response_model="model",
+            input_tokens=7,
+            cached_input_tokens=0,
+            output_tokens=3,
+            reasoning_tokens=2,
+        )
+    ])
+    with pytest.raises(GenerationEngineError) as exc:
+        await GenerationClient(text_provider=provider).generate_structured(
+            _request(max_transport_retries=3)
+        )
+    assert len(provider.calls) == 1
+    assert exc.value.failure.code is FailureCode.PROVIDER_INCOMPLETE
+    assert exc.value.observation.state is ObservationState.INCOMPLETE
+    assert exc.value.observation.provider_attempt_count == 1
+    assert exc.value.observation.transport_retry_count == 0
+    assert exc.value.observation.conformance_retry_count == 0
+    assert exc.value.observation.reasoning_tokens == 2
+    assert exc.value.observation.input_tokens == 7
+    assert exc.value.observation.cached_input_tokens == 0
+    assert exc.value.observation.output_tokens == 3
+
+
+@pytest.mark.asyncio
 async def test_transport_and_conformance_retries_are_distinguishable() -> None:
     provider = ScriptedText(
         [

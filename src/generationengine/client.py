@@ -1015,6 +1015,7 @@ def _failed_observation(
         state = ObservationState.REFUSED
     elif failure.code in {
         FailureCode.STREAM_INCOMPLETE,
+        FailureCode.PROVIDER_INCOMPLETE,
         FailureCode.STRUCTURED_OUTPUT_INVALID,
         FailureCode.MALFORMED_PROVIDER_RESPONSE,
     }:
@@ -1079,6 +1080,7 @@ def _map_provider_exception(exc: Exception) -> ProviderError:
             input_tokens=exc.input_tokens,
             cached_input_tokens=exc.cached_input_tokens,
             output_tokens=exc.output_tokens,
+            reasoning_tokens=exc.reasoning_tokens,
         )
         rebuilt.retry_count = exc.retry_count
         return rebuilt

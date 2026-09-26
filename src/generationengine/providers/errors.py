@@ -16,6 +16,7 @@ class ProviderError(Exception):
         input_tokens: int | None = None,
         cached_input_tokens: int | None = None,
         output_tokens: int | None = None,
+        reasoning_tokens: int | None = None,
     ) -> None:
         super().__init__(failure.message)
         self.failure = failure
@@ -26,6 +27,7 @@ class ProviderError(Exception):
         self.input_tokens = input_tokens
         self.cached_input_tokens = cached_input_tokens
         self.output_tokens = output_tokens
+        self.reasoning_tokens = reasoning_tokens
 
     @property
     def retryable(self) -> bool:

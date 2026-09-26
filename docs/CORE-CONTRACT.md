@@ -371,6 +371,7 @@ Public failures are GenerationEngine types, not OpenAI/Fal/httpx exceptions.
 | `UNSUPPORTED_CAPABILITY` | profile/model/modality not in catalog or not wired | no | capability/model id | no |
 | `INVALID_REQUEST` | caller-owned request failed GE validation | no | field/reason | no |
 | `PROVIDER_REFUSED` | provider content-policy / refusal | no | sanitized provider message | no, unless provider also returned usable content (then `state=refused` with content + observation) |
+| `PROVIDER_INCOMPLETE` | non-streaming provider response explicitly declared incomplete | no | safe provider-neutral message; IDs and usage only in observation | no partial text |
 | `RATE_LIMITED` | provider 429 / quota | yes | retry-after if present | no |
 | `PROVIDER_TIMEOUT` | overall inference budget exceeded | yes | timeout budget | no |
 | `PROVIDER_UNAVAILABLE` | 5xx, overload, transport outage | yes | status if present | no |
@@ -389,6 +390,7 @@ RATE_LIMITED          "Provider rate limit exceeded."
 PROVIDER_TIMEOUT      "Provider request timed out."
 PROVIDER_UNAVAILABLE  "Provider is unavailable."
 PROVIDER_ERROR        "Provider request failed."
+PROVIDER_INCOMPLETE   "Provider returned an incomplete response."
 ```
 
 Do not collapse distinct states into `INTERNAL_ERROR`.
@@ -446,7 +448,7 @@ Legacy SSE-framing helpers are not part of the public core. Product backends tra
 - Products own Pydantic/domain schemas and their domain meaning (`MapSpec`, card item schemas, and so on).
 - GenerationEngine owns structural conformance of inference output to the caller-supplied schema.
 - The engine accepts **JSON Schema** (current) and may later accept a Pydantic type as a convenience that is immediately reduced to JSON Schema. The public contract must not require importing product models.
-- Refusal uses `PROVIDER_REFUSED`. Parse/schema mismatch uses `STRUCTURED_OUTPUT_INVALID`.
+- Refusal uses `PROVIDER_REFUSED`. A provider-declared incomplete non-streaming response uses `PROVIDER_INCOMPLETE` and stops before local conformance or repair. Parse/schema mismatch on completed output uses `STRUCTURED_OUTPUT_INVALID`.
 - Result shape: text content, optional parsed object, observation, optional failure. Parsed data is not a product domain type inside the engine.
 - Tests use a domain-neutral schema (for example a `{name: str, count: int}` fixture), never MapSpec/statblock/card models.
 

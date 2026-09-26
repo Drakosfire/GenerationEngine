@@ -16,6 +16,7 @@ def test_all_accepted_failure_codes_exist() -> None:
         "UNSUPPORTED_CAPABILITY",
         "INVALID_REQUEST",
         "PROVIDER_REFUSED",
+        "PROVIDER_INCOMPLETE",
         "RATE_LIMITED",
         "PROVIDER_TIMEOUT",
         "PROVIDER_UNAVAILABLE",
@@ -33,6 +34,7 @@ def test_retryability_supports_yes_no_unknown() -> None:
     assert set(Retryability) == {Retryability.YES, Retryability.NO, Retryability.UNKNOWN}
     assert FAILURE_RETRYABILITY[FailureCode.RATE_LIMITED] is Retryability.YES
     assert FAILURE_RETRYABILITY[FailureCode.INVALID_REQUEST] is Retryability.NO
+    assert FAILURE_RETRYABILITY[FailureCode.PROVIDER_INCOMPLETE] is Retryability.NO
     assert FAILURE_RETRYABILITY[FailureCode.PROVIDER_ERROR] is Retryability.UNKNOWN
 
 
@@ -75,3 +77,13 @@ def test_provider_transport_messages_are_stable_and_non_secret() -> None:
         assert "sk-live" not in dumped
         assert "openai.com" not in dumped
         assert "socket died" not in dumped
+
+
+def test_incomplete_failure_has_stable_safe_message() -> None:
+    failure = InferenceFailure.from_code(
+        FailureCode.PROVIDER_INCOMPLETE,
+        "partial output Authorization Bearer sk-live",
+    )
+    assert failure.retryability is Retryability.NO
+    assert failure.message == "Provider returned an incomplete response."
+    assert "partial output" not in failure.model_dump_json()

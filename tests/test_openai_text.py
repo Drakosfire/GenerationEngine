@@ -6,7 +6,16 @@ from types import SimpleNamespace
 
 import pytest
 
+from generationengine import (
+    FailureCode,
+    GenerationClient,
+    GenerationEngineError,
+    InferenceProfile,
+    ObservationState,
+    TextRequest,
+)
 from generationengine.providers.base import TextCompleted, TextGenerationCall
+from generationengine.providers.errors import ProviderError
 from generationengine.providers.openai_text import OpenAITextProvider, _ids_from_response
 
 
@@ -121,6 +130,76 @@ class _FakeResponses:
         return self.responses.pop(0)
 
 
+@pytest.mark.asyncio
+async def test_openai_incomplete_response_preserves_safe_metadata_without_partial_text() -> None:
+    response = _sdk_response(text="SECRET partial output", input_tokens=0, output_tokens=3)
+    response.status = "incomplete"
+    response.usage.output_tokens_details = SimpleNamespace(reasoning_tokens=2)
+    responses = _FakeResponses([response])
+    provider = OpenAITextProvider(client=SimpleNamespace(responses=responses))
+
+    with pytest.raises(ProviderError) as exc:
+        await provider.generate(_openai_call())
+
+    assert exc.value.failure.code is FailureCode.PROVIDER_INCOMPLETE
+    assert exc.value.failure.message == "Provider returned an incomplete response."
+    assert exc.value.provider_request_id == "req_http"
+    assert exc.value.provider_response_id == "resp_abc"
+    assert exc.value.response_model == "gpt-5.1"
+    assert (exc.value.input_tokens, exc.value.cached_input_tokens, exc.value.output_tokens, exc.value.reasoning_tokens) == (0, 0, 3, 2)
+    assert "SECRET" not in str(exc.value)
+    assert len(responses.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_openai_incomplete_unknown_usage_remains_unknown() -> None:
+    response = _sdk_response(text="partial")
+    response.status = "incomplete"
+    response.usage = None
+    provider = OpenAITextProvider(client=SimpleNamespace(responses=_FakeResponses([response])))
+    with pytest.raises(ProviderError) as exc:
+        await provider.generate(_openai_call())
+    assert (exc.value.input_tokens, exc.value.cached_input_tokens, exc.value.output_tokens, exc.value.reasoning_tokens) == (None, None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_openai_refusal_precedes_incomplete_status() -> None:
+    response = _sdk_response(text="partial")
+    response.status = "incomplete"
+    response.refusal = "provider refusal"
+    provider = OpenAITextProvider(client=SimpleNamespace(responses=_FakeResponses([response])))
+    with pytest.raises(ProviderError) as exc:
+        await provider.generate(_openai_call())
+    assert exc.value.failure.code is FailureCode.PROVIDER_REFUSED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("partial", ["{not-json", '{"name":"ok","count":1}'])
+async def test_openai_structured_incomplete_never_repairs_or_accepts_partial(partial: str) -> None:
+    response = _sdk_response(text=partial)
+    response.status = "incomplete"
+    response.usage.output_tokens_details = SimpleNamespace(reasoning_tokens=5)
+    responses = _FakeResponses([response])
+    client = GenerationClient(text_provider=OpenAITextProvider(client=SimpleNamespace(responses=responses)))
+    schema = {
+        "type": "object",
+        "properties": {"name": {"type": "string"}, "count": {"type": "integer"}},
+        "required": ["name", "count"],
+        "additionalProperties": False,
+    }
+    with pytest.raises(GenerationEngineError) as exc:
+        await client.generate_structured(TextRequest(user_prompt="make fixture", profile=InferenceProfile.STRUCTURED_LOW_COST, json_schema=schema, max_transport_retries=3))
+    assert exc.value.failure.code is FailureCode.PROVIDER_INCOMPLETE
+    assert exc.value.observation.state is ObservationState.INCOMPLETE
+    assert exc.value.observation.provider_attempt_count == 1
+    assert exc.value.observation.transport_retry_count == 0
+    assert exc.value.observation.conformance_retry_count == 0
+    assert exc.value.observation.reasoning_tokens == 5
+    assert len(responses.calls) == 1
+    assert responses.calls[0]["input"] == "make fixture"
+    assert partial not in str(exc.value.observation.model_dump())
+
+
 def test_openai_malformed_structured_json_returns_raw_text() -> None:
     response = _sdk_response(text="{not-json")
     result = OpenAITextProvider(client=SimpleNamespace())._result_from_response(response)
@@ -222,6 +301,7 @@ def test_openai_reasoning_wire_and_usage_truth() -> None:
 @pytest.mark.asyncio
 async def test_openai_stream_reports_reasoning_tokens() -> None:
     response = _sdk_response(text="ok")
+    response.status = "incomplete"  # E5P must not change the shared streaming parser.
     response.usage.output_tokens_details = SimpleNamespace(reasoning_tokens=4)
 
     class StreamManager:
