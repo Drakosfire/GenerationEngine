@@ -1,11 +1,11 @@
 # HANDOFF — GEJ-01 Generic typed-decision capability
 
-**Status:** ACTIVE — implementation lease, pending acceptance
-**Repository:** `Drakosfire/GenerationEngine`  
-**Creation anchor:** `main@19cf68dceb5f4ec7a3d20e17ae6d5c9c8d7aeaa5`  
-**Cross-repo authority:** `Drakosfire/DungeonOverMind/Docs/Plans/STACK-rules-ingestion-generationengine-sidequest.md`  
-**Primary question:** Can GenerationEngine represent typed probabilistic decision inference as a generic capability without knowing Jev, rules, or RulesIngestion semantics?  
-**Predecessor:** side-quest activation only  
+**Status:** READY FOR REVIEW — acceptance witnessed; do not merge before review
+**Repository:** `Drakosfire/GenerationEngine`
+**Creation anchor:** `main@19cf68dceb5f4ec7a3d20e17ae6d5c9c8d7aeaa5`
+**Cross-repo authority:** `Drakosfire/DungeonOverMind/Docs/Plans/STACK-rules-ingestion-generationengine-sidequest.md`
+**Primary question:** Can GenerationEngine represent typed probabilistic decision inference as a generic capability without knowing Jev, rules, or RulesIngestion semantics?
+**Predecessor:** side-quest activation only
 **Unlocks:** GEJ-02
 
 ## Stack position
@@ -173,3 +173,14 @@ Stop and revise architecture if implementing decisions requires:
 - parsing free-form generated prose as the decision contract;
 - weakening existing provider/failure boundaries;
 - pretending a gateway alias is a concrete upstream model version.
+
+## Implementation and acceptance evidence (2026-09-26)
+
+- Exact intended base: `main@19cf68dceb5f4ec7a3d20e17ae6d5c9c8d7aeaa5`.
+- Tested implementation head: `ac796b040ecd9a3f9f2fb5a3ab8513ec0676e353`. The following handoff-only evidence update is a separate commit on the same PR branch.
+- Scope: provider-neutral Binary/Choice/Score request and answer types, explicit provider+model decision dispatch, `DecisionProvider` protocol, shared deadline/retry/failure handling, one observation per decision operation, and optional `provider_transport` without fabricating an upstream model version. No production decision adapter or decision profile was added.
+- Lease deviations were identified before implementation in the activation re-anchor above: minimal `resolver.py` dispatch and the two exact-set tests. The cumulative implementation diff is limited to this handoff, generic contract/current-state docs, public capability/client/types/provider/observation/resolver code, and corresponding tests.
+- Focused decision/public surface/explicit target tests passed. CI gates passed on both Python 3.11 and 3.13: `uv lock --check`, `ruff check .`, and `pytest -q` (175 passed on each). `uv build` produced source and wheel distributions; the full test suite's isolated wheel-import test passed. No separate static type-check gate is configured in CI.
+- Remaining limitation: the public seam is usable with an injected `DecisionProvider`; `GenerationClient.from_env()` has no decision provider until GEJ-02. This is the planned dependency, not a GEJ-01 acceptance failure.
+
+Acceptance token satisfied: `GEJ_01_GENERIC_DECISION_CAPABILITY_ACCEPTED`.
