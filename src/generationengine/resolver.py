@@ -140,6 +140,7 @@ def resolve(
     profile: InferenceProfile | None = None,
     model: str | None = None,
     provider: str | None = None,
+    registered_providers: frozenset[str] | None = None,
 ) -> Resolution:
     """Resolve a profile, catalog model, or explicit provider+model target.
 
@@ -165,11 +166,20 @@ def resolve(
 
     if requested_provider and requested_model:
         registered = requested_provider.lower()
-        if registered not in REGISTERED_TEXT_PROVIDERS:
+        allowed = (
+            registered_providers
+            if registered_providers is not None
+            else (frozenset() if capability is Capability.DECISION else REGISTERED_TEXT_PROVIDERS)
+        )
+        if registered not in allowed:
             raise ResolutionError(
                 InferenceFailure.from_code(
                     FailureCode.UNSUPPORTED_CAPABILITY,
-                    f"Text provider {registered!r} is not registered.",
+                    (
+                        f"Provider {registered!r} does not support decision."
+                        if capability is Capability.DECISION
+                        else f"Text provider {registered!r} is not registered."
+                    ),
                 )
             )
         return Resolution(

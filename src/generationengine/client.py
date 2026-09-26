@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TypeVar
+
+from pydantic import ValidationError
 
 from generationengine.catalog import Capability
 from generationengine.conformance import (
@@ -18,6 +21,9 @@ from generationengine.conformance import (
 from generationengine.failures import FailureCode, InferenceFailure
 from generationengine.observation import InferenceObservation, ObservationState
 from generationengine.providers.base import (
+    DecisionGenerationCall,
+    DecisionGenerationResult,
+    DecisionProvider,
     ImageProvider,
     TextCompleted,
     TextFailed,
@@ -29,10 +35,16 @@ from generationengine.providers.base import (
 from generationengine.providers.errors import ProviderError
 from generationengine.resolver import ResolutionError, resolve
 from generationengine.types import (
+    ChoiceDecisionAnswer,
+    ChoiceDecisionQuestion,
+    DecisionRequest,
+    DecisionResult,
     GeneratedImage,
     GenerationEngineError,
     ImageRequest,
     ImageResult,
+    ScoreDecisionAnswer,
+    ScoreDecisionQuestion,
     TextRequest,
     TextResult,
 )
@@ -54,6 +66,7 @@ class GenerationClient:
         text_provider: TextProvider | None = None,
         image_provider: ImageProvider | None = None,
         text_providers: dict[str, TextProvider] | None = None,
+        decision_providers: dict[str, DecisionProvider] | None = None,
     ) -> None:
         self._text_providers: dict[str, TextProvider] = {}
         if text_providers:
@@ -62,6 +75,9 @@ class GenerationClient:
         if text_provider is not None:
             self._text_providers.setdefault("openai", text_provider)
         self._image = image_provider
+        self._decision_providers = {
+            name.strip().lower(): provider for name, provider in (decision_providers or {}).items()
+        }
         self._closed = False
 
     @classmethod
@@ -75,7 +91,7 @@ class GenerationClient:
             return
         self._closed = True
 
-        providers = [*self._text_providers.values()]
+        providers = [*self._text_providers.values(), *self._decision_providers.values()]
         if self._image is not None:
             providers.append(self._image)
 
@@ -103,6 +119,7 @@ class GenerationClient:
         *,
         request: TextRequest | None = None,
         image: ImageRequest | None = None,
+        decision: DecisionRequest | None = None,
     ) -> None:
         if self._closed:
             raise _config_error(
@@ -112,6 +129,7 @@ class GenerationClient:
                 ),
                 request=request,
                 image=image,
+                decision=decision,
                 provider_attempt_count=0,
             )
 
@@ -207,6 +225,105 @@ class GenerationClient:
                 provider_attempt_count=0,
             ) from exc
         return await self._generate_structured(request)
+
+    async def decide(self, request: DecisionRequest | dict) -> DecisionResult:
+        """One provider-neutral typed decision operation under the shared retry/deadline policy."""
+        try:
+            request = DecisionRequest.model_validate(
+                request.model_dump(mode="python") if isinstance(request, DecisionRequest) else request
+            )
+        except ValidationError as exc:
+            raise _config_error(
+                InferenceFailure.from_code(FailureCode.INVALID_REQUEST, "Invalid decision request."),
+                provider_attempt_count=0,
+            ) from exc
+        self._ensure_open(decision=request)
+        if not request.provider or not request.model or not request.provider.strip() or not request.model.strip():
+            raise _config_error(
+                InferenceFailure.from_code(
+                    FailureCode.INVALID_REQUEST, "Decision inference requires provider and model."
+                ),
+                decision=request,
+                provider_attempt_count=0,
+            )
+        started = time.monotonic()
+        try:
+            resolution = resolve(
+                capability=Capability.DECISION,
+                provider=request.provider,
+                model=request.model,
+                registered_providers=frozenset(self._decision_providers),
+            )
+        except ResolutionError as exc:
+            raise _config_error(exc.failure, decision=request, provider_attempt_count=0) from exc
+        provider = self._decision_providers[resolution.provider]
+        call = DecisionGenerationCall(
+            model=resolution.provider_model_id,
+            state=request.state,
+            questions=request.questions,
+        )
+        attempts = 0
+
+        async def attempt() -> object:
+            nonlocal attempts
+            attempts += 1
+            try:
+                return await provider.decide(call)
+            except ProviderError:
+                raise
+            except Exception as exc:
+                raise _map_provider_exception(exc) from exc
+
+        try:
+            raw, retry_count = await _execute_with_retries(
+                started=started,
+                deadline_s=_deadline_s(request.deadline_ms),
+                attempt=attempt,
+                max_transport_retries=request.max_transport_retries,
+            )
+        except ProviderError as exc:
+            raise GenerationEngineError(
+                exc.failure,
+                _failed_observation(
+                    failure=exc.failure,
+                    decision=request,
+                    resolution=resolution,
+                    latency_ms=_elapsed_ms(started),
+                    retry_count=_retry_count_from_error(exc),
+                    provider_attempt_count=attempts,
+                    result=exc,
+                ),
+            ) from exc
+        try:
+            result = DecisionGenerationResult.model_validate(
+                raw.model_dump(mode="python") if isinstance(raw, DecisionGenerationResult) else raw
+            )
+            _validate_decision_answers(request, result)
+        except (ValidationError, ValueError, TypeError) as exc:
+            failure = InferenceFailure.from_code(
+                FailureCode.MALFORMED_PROVIDER_RESPONSE,
+                "Provider returned an invalid decision result.",
+            )
+            raise GenerationEngineError(
+                failure,
+                _failed_observation(
+                    failure=failure,
+                    decision=request,
+                    resolution=resolution,
+                    latency_ms=_elapsed_ms(started),
+                    retry_count=retry_count,
+                    provider_attempt_count=attempts,
+                ),
+            ) from exc
+        observation = _completed_observation(
+            request=request,
+            resolution=resolution,
+            result=result,
+            latency_ms=_elapsed_ms(started),
+            retry_count=retry_count,
+            provider_attempt_count=attempts,
+        )
+        return DecisionResult(answers=result.answers, observation=observation)
 
     async def stream_text(self, request: TextRequest) -> AsyncIterator[TextStreamEvent]:
         """Yield deltas, then exactly one terminal. Streaming does not retry."""
@@ -683,6 +800,33 @@ def _text_call(
     )
 
 
+def _validate_decision_answers(request: DecisionRequest, result: DecisionGenerationResult) -> None:
+    questions = {question.name: question for question in request.questions}
+    if set(result.answers) != set(questions):
+        raise ValueError("Decision answer names do not match requested questions")
+    for name, answer in result.answers.items():
+        question = questions[name]
+        if answer.kind != question.kind:
+            raise ValueError("Decision answer kind differs from question kind")
+        if isinstance(question, ChoiceDecisionQuestion):
+            if not isinstance(answer, ChoiceDecisionAnswer) or answer.selected not in question.options:
+                raise ValueError("Choice answer selected an unknown option")
+            distribution = answer.probabilities
+            allowed = set(question.options)
+        elif isinstance(question, ScoreDecisionQuestion):
+            if not isinstance(answer, ScoreDecisionAnswer):
+                raise ValueError("Score answer has the wrong shape")
+            distribution = answer.distribution
+            allowed = set(question.levels)
+        else:
+            continue
+        if distribution is not None and (
+            not set(distribution) <= allowed
+            or any(not math.isfinite(value) or not 0 <= value <= 1 for value in distribution.values())
+        ):
+            raise ValueError("Decision distribution has invalid labels or probabilities")
+
+
 async def _execute_with_retries(
     *,
     started: float,
@@ -840,6 +984,7 @@ def _config_error(
     provider: str | None = None,
     request: TextRequest | None = None,
     image: ImageRequest | None = None,
+    decision: DecisionRequest | None = None,
     provider_attempt_count: int | None = None,
 ) -> GenerationEngineError:
     return GenerationEngineError(
@@ -848,6 +993,7 @@ def _config_error(
             failure=failure,
             request=request,
             image=image,
+            decision=decision,
             provider=provider,
             latency_ms=0,
             retry_count=0,
@@ -950,7 +1096,7 @@ def _completed_observation_from_stream(
 
 def _completed_observation(
     *,
-    request: TextRequest,
+    request: TextRequest | DecisionRequest,
     resolution,
     result,
     latency_ms: int,
@@ -960,10 +1106,11 @@ def _completed_observation(
 ) -> InferenceObservation:
     return InferenceObservation(
         provider=resolution.provider,
-        requested_profile=request.profile.value if request.profile else None,
+        requested_profile=request.profile.value if isinstance(request, TextRequest) and request.profile else None,
         requested_model=request.model,
         resolved_model=resolution.resolved_model,
         response_model=result.response_model,
+        provider_transport=getattr(result, "provider_transport", None),
         provider_request_id=result.provider_request_id,
         provider_response_id=getattr(result, "provider_response_id", None),
         input_tokens=result.input_tokens,
@@ -986,6 +1133,7 @@ def _failed_observation(
     failure: InferenceFailure,
     request: TextRequest | None = None,
     image: ImageRequest | None = None,
+    decision: DecisionRequest | None = None,
     resolution=None,
     latency_ms: int,
     retry_count: int,
@@ -1010,6 +1158,8 @@ def _failed_observation(
     elif image is not None:
         profile = image.profile.value if image.profile else None
         model = image.model
+    elif decision is not None:
+        model = decision.model
     state = ObservationState.FAILED
     if failure.code is FailureCode.PROVIDER_REFUSED:
         state = ObservationState.REFUSED
@@ -1026,6 +1176,7 @@ def _failed_observation(
         requested_model=model,
         resolved_model=resolution.resolved_model if resolution else None,
         response_model=response_model or (result.response_model if result else None),
+        provider_transport=getattr(result, "provider_transport", None) if result else None,
         provider_request_id=provider_request_id
         or (result.provider_request_id if result else None),
         provider_response_id=provider_response_id
@@ -1077,6 +1228,7 @@ def _map_provider_exception(exc: Exception) -> ProviderError:
             provider_request_id=exc.provider_request_id,
             provider_response_id=exc.provider_response_id,
             response_model=exc.response_model,
+            provider_transport=exc.provider_transport,
             input_tokens=exc.input_tokens,
             cached_input_tokens=exc.cached_input_tokens,
             output_tokens=exc.output_tokens,

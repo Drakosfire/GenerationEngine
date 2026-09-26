@@ -179,7 +179,9 @@ def test_current_documentation_authority_shape() -> None:
     active_docs = {
         path
         for path in (REPO_ROOT / "docs").rglob("*")
-        if path.is_file() and "archive" not in path.relative_to(REPO_ROOT / "docs").parts
+        if path.is_file()
+        and "archive" not in path.relative_to(REPO_ROOT / "docs").parts
+        and "Handoffs" not in path.relative_to(REPO_ROOT / "docs").parts
     }
     assert active_docs == required, (
         "unexpected active docs outside the authority set: "

@@ -1,6 +1,6 @@
 # HANDOFF — GEJ-01 Generic typed-decision capability
 
-**Status:** DEFERRED DRAFT — side quest shell, no implementation yet  
+**Status:** ACTIVE — implementation lease, pending acceptance
 **Repository:** `Drakosfire/GenerationEngine`  
 **Creation anchor:** `main@19cf68dceb5f4ec7a3d20e17ae6d5c9c8d7aeaa5`  
 **Cross-repo authority:** `Drakosfire/DungeonOverMind/Docs/Plans/STACK-rules-ingestion-generationengine-sidequest.md`  
@@ -27,6 +27,10 @@ RLH-05 rebase + resumed review
 ```
 
 GenerationEngine PR #14 (governance) was open when this shell was planted. Re-census it and all active PRs before coding; if it touches only governance/docs, rebase rather than absorbing unrelated work.
+
+Activation re-anchor (2026-09-26): `main` remains `19cf68dceb5f4ec7a3d20e17ae6d5c9c8d7aeaa5`, exactly the creation anchor. This PR head initially contains only this handoff at `27ed6cb7a889579b968de8f057a4e34b5ba7ae1f`. Open PR #14 adds only `AGENTS.md`; PR #16 is the GEJ-02 handoff stacked on this branch. There is no implementation-path collision. `resolve()` currently assumes explicit targets use text providers, so the lease includes its smallest capability-aware dispatch change; existing text/image resolution behavior must remain identical. No new profile is introduced.
+
+Gate re-anchor: `tests/test_catalog.py` names the exact public capability vocabulary and must include `decision`. `tests/test_core_contract_invariants.py` treats every non-archived docs file as settled authority; the planted `docs/Handoffs/` shell itself violates that assumption even before implementation. The lease includes the smallest test correction to classify `docs/Handoffs/` as non-authoritative implementation records while retaining the exact-set check on settled docs.
 
 ## Ownership decision
 

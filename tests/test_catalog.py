@@ -21,6 +21,7 @@ def test_capability_vocabulary_is_product_neutral() -> None:
         "streaming_text",
         "image",
         "image_edit",
+        "decision",
     }
 
 

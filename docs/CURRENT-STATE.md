@@ -10,6 +10,7 @@
 GenerationClient
   generate_text
   generate_structured
+  decide
   stream_text
   generate_image
   edit_image
@@ -17,6 +18,10 @@ GenerationClient
 ```
 
 Public request/result/failure/observation types are exported from `generationengine`.
+
+## Typed decisions
+
+The generic `DECISION` capability has provider-neutral Binary, Choice, and Score questions/results and a distinct `DecisionProvider` execution seam. `decide()` requires an explicit registered decision provider and model, validates JSON-safe state and typed answer alignment, and applies the existing overall deadline, transport retry, and normalized failure rules. This GEJ-01 slice intentionally wires no production decision provider; GEJ-02 will implement the first adapter. No text fallback or decision profile is added.
 
 ## Text execution
 
@@ -108,6 +113,7 @@ GenerationEngine does not publish artifacts, upload to Cloudflare, or return pro
 `InferenceObservation` records inference-call truth across success/failure:
 
 - provider/requested/resolved/response model IDs;
+- optional intermediary `provider_transport`, without inferring an upstream concrete model;
 - provider request/response IDs when known;
 - input/cached/output token usage when known;
 - provider-reported reasoning tokens when known (`None` remains unknown);
