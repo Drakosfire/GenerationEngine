@@ -21,7 +21,7 @@ Public request/result/failure/observation types are exported from `generationeng
 
 ## Typed decisions
 
-The generic `DECISION` capability has provider-neutral Binary, Choice, and Score questions/results and a distinct `DecisionProvider` execution seam. `decide()` requires an explicit registered decision provider and model, validates JSON-safe state and typed answer alignment, and applies the existing overall deadline, transport retry, and normalized failure rules. This GEJ-01 slice intentionally wires no production decision provider; GEJ-02 will implement the first adapter. No text fallback or decision profile is added.
+The generic `DECISION` capability has provider-neutral Binary, Choice, and Score questions/results and a distinct `DecisionProvider` execution seam. `decide()` requires an explicit registered decision provider and model, validates JSON-safe state and typed answer alignment, and applies the existing overall deadline, transport retry, and normalized failure rules. The optional `typesafe` extra wires the first provider adapter through the official async SDK and the Vercel AI Gateway route with SDK retries disabled. The adapter reads `TYPESAFE_JEV_API_KEY` itself. No text fallback or decision profile is added.
 
 ## Text execution
 

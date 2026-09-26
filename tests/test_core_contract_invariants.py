@@ -124,6 +124,8 @@ def test_openai_is_not_a_core_required_dependency() -> None:
     assert "openai" not in required_names
     assert "fal-client" not in required_names
     assert "fal_client" not in required_names
+    assert "typesafe-sdk" not in required_names
+    assert "typesafe_sdk" not in required_names
 
 
 def test_built_wheel_imports_without_provider_extras(tmp_path: Path) -> None:

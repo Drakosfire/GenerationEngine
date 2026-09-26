@@ -180,6 +180,32 @@ class GenerationClient:
                 ) from exc
         return self._image
 
+    def _decision_provider_for(self, provider_id: str, request: DecisionRequest) -> None:
+        key = provider_id.strip().lower()
+        if key in self._decision_providers or key != "typesafe":
+            return
+        try:
+            from generationengine.providers.typesafe_decision import TypeSafeDecisionProvider
+        except ImportError as exc:
+            raise _config_error(
+                InferenceFailure.from_code(
+                    FailureCode.CONFIGURATION_UNAVAILABLE,
+                    "Install the typesafe extra for TypeSafe decisions.",
+                ),
+                decision=request,
+                provider="typesafe",
+                provider_attempt_count=0,
+            ) from exc
+        try:
+            self._decision_providers[key] = TypeSafeDecisionProvider()
+        except ProviderError as exc:
+            raise _config_error(
+                exc.failure,
+                decision=request,
+                provider="typesafe",
+                provider_attempt_count=0,
+            ) from exc
+
     async def generate_text(self, request: TextRequest) -> TextResult:
         self._ensure_open(request=request)
         if request.json_object and request.json_schema is not None:
@@ -247,6 +273,7 @@ class GenerationClient:
                 provider_attempt_count=0,
             )
         started = time.monotonic()
+        self._decision_provider_for(request.provider, request)
         try:
             resolution = resolve(
                 capability=Capability.DECISION,

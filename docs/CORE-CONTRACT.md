@@ -73,6 +73,8 @@ The `DecisionProvider` protocol receives a provider-neutral `DecisionGenerationC
 
 Optional answer confidence, binary true probability, Choice probabilities, and Score distribution preserve what a provider reports. Their absence remains `None`; GenerationEngine does not invent calibration. Provider adapters may use provider-native controls, but those controls and SDK types remain behind the adapter seam.
 
+The first adapter is the optional `typesafe` extra. It maps these public forms to the official SDK's three question families inside the provider module, uses the async SDK with its internal retries disabled, and routes through the Vercel AI Gateway TypeSafe endpoint. It reads `TYPESAFE_JEV_API_KEY` in GenerationEngine. A scalar JSON state is valid in the generic contract but is rejected as `INVALID_REQUEST` by this adapter because the current TypeSafe API accepts only text, object, or array state. `provider_transport=vercel_ai_gateway` identifies the route and does not imply a concrete upstream model version.
+
 Hosting remains in-process. A network GenerationEngine service is not part of the current contract.
 
 ### Text temperature

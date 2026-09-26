@@ -20,7 +20,7 @@ jobs:
       - name: Lockfile
         run: uv lock --check
       - name: Install
-        run: uv sync --group dev --extra openai --extra fal
+        run: uv sync --group dev --extra openai --extra fal --extra typesafe
       - name: Ruff
         run: uv run ruff check .
       - name: Tests
