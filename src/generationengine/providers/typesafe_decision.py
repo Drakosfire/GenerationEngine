@@ -92,8 +92,11 @@ class TypeSafeDecisionProvider:
             usage = response.usage
             if metadata["response_model"] is None:
                 raise ValueError("Missing response model")
-            if usage is None or metadata["input_tokens"] is None or metadata["output_tokens"] is None:
-                raise ValueError("Invalid response usage")
+            if usage is not None:
+                for field in ("input_tokens", "output_tokens"):
+                    value = getattr(usage, field)
+                    if value is not None and (type(value) is not int or value < 0):
+                        raise ValueError("Invalid response usage")
             return DecisionGenerationResult(
                 answers=answers,
                 **metadata,

@@ -51,10 +51,13 @@ def request() -> DecisionRequest:
     )
 
 
-def sdk_response(*, model: str = "typesafe-ai/jev") -> SystemOneResponse:
+def sdk_response(
+    *, model: str = "typesafe-ai/jev", input_tokens: int | None = 14,
+    output_tokens: int | None = 0,
+) -> SystemOneResponse:
     return SystemOneResponse.model_validate({
         "model": model,
-        "usage": {"input_tokens": 14, "output_tokens": 0},
+        "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
         "answers": {
             "yes": {"type": "noul", "noul": 0.8},
             "category": {"type": "choice", "choice": "a", "confidence": 0.7,
@@ -106,6 +109,39 @@ async def test_three_question_families_and_truthful_gateway_observation():
     assert result.observation.input_tokens == 14
     assert result.observation.output_tokens == 0
     assert result.observation.provider_attempt_count == 1
+
+
+@pytest.mark.asyncio
+async def test_unknown_sdk_usage_stays_unknown_on_success():
+    response = sdk_response(input_tokens=None, output_tokens=None)
+    result = await GenerationClient(decision_providers={
+        "typesafe": TypeSafeDecisionProvider(client=FakeSDKClient(response))
+    }).decide(request())
+    assert result.answers["yes"].value is True
+    assert result.observation.response_model == "typesafe-ai/jev"
+    assert result.observation.input_tokens is None
+    assert result.observation.output_tokens is None
+    assert result.observation.provider_attempt_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,value", [
+    ("input_tokens", -1), ("input_tokens", "14"),
+    ("output_tokens", -1), ("output_tokens", True),
+])
+async def test_malformed_sdk_usage_fails_closed(field, value):
+    response = sdk_response()
+    bad_usage = response.usage.model_copy(update={field: value})
+    bad = response.model_copy(update={"usage": bad_usage})
+    with pytest.raises(GenerationEngineError) as exc:
+        await GenerationClient(decision_providers={
+            "typesafe": TypeSafeDecisionProvider(client=FakeSDKClient(bad))
+        }).decide(request())
+    assert exc.value.failure.code is FailureCode.MALFORMED_PROVIDER_RESPONSE
+    assert exc.value.observation.response_model == "typesafe-ai/jev"
+    assert exc.value.observation.provider_transport == TRANSPORT
+    assert value != exc.value.observation.input_tokens
+    assert value != exc.value.observation.output_tokens
 
 
 @pytest.mark.asyncio
