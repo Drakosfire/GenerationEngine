@@ -13,6 +13,7 @@ class ProviderError(Exception):
         provider_request_id: str | None = None,
         provider_response_id: str | None = None,
         response_model: str | None = None,
+        provider_transport: str | None = None,
         input_tokens: int | None = None,
         cached_input_tokens: int | None = None,
         output_tokens: int | None = None,
@@ -24,6 +25,7 @@ class ProviderError(Exception):
         self.provider_response_id = provider_response_id
         self.retry_count = 0
         self.response_model = response_model
+        self.provider_transport = provider_transport
         self.input_tokens = input_tokens
         self.cached_input_tokens = cached_input_tokens
         self.output_tokens = output_tokens

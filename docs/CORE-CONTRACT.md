@@ -36,6 +36,7 @@ image generation
 image editing / inpainting
 retry / timeout behavior
 provider error normalization
+typed probabilistic decision execution (provider-neutral Binary, Choice, Score)
 usage normalization
 pricing and inference-call cost
 provider request IDs
@@ -57,11 +58,20 @@ structured text
 streaming text
 image generation
 image editing / inpainting
+typed decision
 ```
 
 Do not add methods named `generate_statblock`, `generate_card`, `generate_map`, or `generate_character`.
 
 Embeddings, transcription, speech, and moderation are out of this contract until an explicit ownership decision adds them.
+
+### Typed decision capability
+
+`GenerationClient.decide(DecisionRequest)` is separate from text and structured-text generation. A request supplies JSON-safe state, one or more uniquely named Binary, Choice, or Score questions, an explicit provider and model, and optional overall deadline/transport-retry controls. Choice options and Score levels are ordered, distinct labels; Score requires at least two levels. Choice questions may include a description for every option to preserve the caller's meaning. Products own the question wording and label meaning.
+
+The `DecisionProvider` protocol receives a provider-neutral `DecisionGenerationCall` and returns typed answers plus provider-call metadata. The client validates exact answer-name/kind alignment, choice membership, distribution labels/probabilities, and finite scores. A malformed provider answer becomes `MALFORMED_PROVIDER_RESPONSE`; invalid caller input becomes `INVALID_REQUEST`. A provider capability not wired for decisions becomes `UNSUPPORTED_CAPABILITY`. There is no text-generation fallback or generic decision profile in this slice. One `decide()` operation yields one `InferenceObservation` across transport retries.
+
+Optional answer confidence, binary true probability, Choice probabilities, and Score distribution preserve what a provider reports. Their absence remains `None`; GenerationEngine does not invent calibration. Provider adapters may use provider-native controls, but those controls and SDK types remain behind the adapter seam.
 
 Hosting remains in-process. A network GenerationEngine service is not part of the current contract.
 
@@ -167,6 +177,7 @@ Capability-focused protocols, not one giant provider type:
 ```text
 TextProvider
 ImageProvider
+DecisionProvider
 ```
 
 After the provider reset:
@@ -284,6 +295,7 @@ InferenceObservation
   requested_model       str | None
   resolved_model        str | None
   response_model        str | None
+  provider_transport    str | None     # intermediary execution route, if known
   provider_request_id   str | None
   provider_response_id  str | None
   input_tokens          int | None
@@ -306,6 +318,7 @@ Python names may differ; semantics must not.
 ### Unknown vs zero
 
 - `None` means the provider or layer did not supply the value
+- `response_model` may itself be a floating alias; `provider_transport` does not prove an upstream concrete model version
 - `0` means the provider supplied zero
 - missing usage must not become `0` just to satisfy a numeric field
 - reasoning tokens are an additional output-token breakdown; unknown stays

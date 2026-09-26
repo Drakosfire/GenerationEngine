@@ -13,6 +13,7 @@ from typing_extensions import runtime_checkable
 
 from generationengine.failures import InferenceFailure
 from generationengine.observation import InferenceObservation
+from generationengine.types import DecisionAnswer, DecisionQuestion
 
 
 class TextGenerationCall(BaseModel):
@@ -58,6 +59,34 @@ class TextGenerationResult(BaseModel):
     cached_input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
     reasoning_tokens: int | None = Field(default=None, ge=0)
+
+
+class DecisionGenerationCall(BaseModel):
+    """Provider-neutral typed decision call; no provider SDK vocabulary."""
+
+    model: str
+    state: Any
+    questions: tuple[DecisionQuestion, ...]
+
+
+class DecisionGenerationResult(BaseModel):
+    answers: dict[str, DecisionAnswer]
+    provider_request_id: str | None = None
+    provider_response_id: str | None = None
+    response_model: str | None = None
+    provider_transport: str | None = None
+    input_tokens: int | None = Field(default=None, ge=0)
+    cached_input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    reasoning_tokens: int | None = Field(default=None, ge=0)
+
+
+@runtime_checkable
+class DecisionProvider(Protocol):
+    """Execute one typed decision operation behind a provider adapter."""
+
+    async def decide(self, call: DecisionGenerationCall) -> DecisionGenerationResult:
+        ...
 
 
 @runtime_checkable

@@ -45,6 +45,7 @@ class InferenceObservation(BaseModel):
     requested_model: str | None = None
     resolved_model: str | None = None
     response_model: str | None = None
+    provider_transport: str | None = None
     provider_request_id: str | None = None
     provider_response_id: str | None = None
     input_tokens: int | None = Field(default=None, ge=0)

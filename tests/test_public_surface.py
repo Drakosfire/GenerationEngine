@@ -5,6 +5,14 @@ from __future__ import annotations
 import generationengine as ge
 
 PUBLIC = (
+    "BinaryDecisionQuestion",
+    "ChoiceDecisionQuestion",
+    "ScoreDecisionQuestion",
+    "DecisionQuestion",
+    "DecisionRequest",
+    "DecisionAnswer",
+    "DecisionResult",
+    "DecisionProvider",
     "GenerationClient",
     "GenerationEngineError",
     "TextRequest",

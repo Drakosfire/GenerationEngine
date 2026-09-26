@@ -15,6 +15,9 @@ from generationengine.client import GenerationClient
 from generationengine.failures import FailureCode, InferenceFailure, Retryability
 from generationengine.observation import InferenceObservation, ObservationState
 from generationengine.providers.base import (
+    DecisionGenerationCall,
+    DecisionGenerationResult,
+    DecisionProvider,
     ImageProvider,
     TextCompleted,
     TextDelta,
@@ -26,10 +29,20 @@ from generationengine.providers.base import (
 )
 from generationengine.resolver import LIVE_MODELS, ResolutionError, resolve
 from generationengine.types import (
+    BinaryDecisionAnswer,
+    BinaryDecisionQuestion,
+    ChoiceDecisionAnswer,
+    ChoiceDecisionQuestion,
+    DecisionAnswer,
+    DecisionQuestion,
+    DecisionRequest,
+    DecisionResult,
     GeneratedImage,
     GenerationEngineError,
     ImageRequest,
     ImageResult,
+    ScoreDecisionAnswer,
+    ScoreDecisionQuestion,
     TextRequest,
     TextResult,
 )
@@ -37,10 +50,21 @@ from generationengine.types import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "BinaryDecisionAnswer",
+    "BinaryDecisionQuestion",
     "ACCEPTED_CAPABILITIES",
     "ACCEPTED_PROFILES",
     "Availability",
     "Capability",
+    "ChoiceDecisionAnswer",
+    "ChoiceDecisionQuestion",
+    "DecisionAnswer",
+    "DecisionGenerationCall",
+    "DecisionGenerationResult",
+    "DecisionProvider",
+    "DecisionQuestion",
+    "DecisionRequest",
+    "DecisionResult",
     "FailureCode",
     "GeneratedImage",
     "GenerationClient",
@@ -57,6 +81,8 @@ __all__ = [
     "PricingDimension",
     "ResolutionError",
     "Retryability",
+    "ScoreDecisionAnswer",
+    "ScoreDecisionQuestion",
     "TextCompleted",
     "TextDelta",
     "TextFailed",

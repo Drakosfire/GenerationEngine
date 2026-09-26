@@ -13,6 +13,7 @@ class Capability(str, Enum):
     STREAMING_TEXT = "streaming_text"
     IMAGE = "image"
     IMAGE_EDIT = "image_edit"
+    DECISION = "decision"
 
 
 class InferenceProfile(str, Enum):
