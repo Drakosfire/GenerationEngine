@@ -294,6 +294,7 @@ class GenerationClient:
                     result=exc,
                 ),
             ) from exc
+        result: DecisionGenerationResult | None = None
         try:
             result = DecisionGenerationResult.model_validate(
                 raw.model_dump(mode="python") if isinstance(raw, DecisionGenerationResult) else raw
@@ -313,6 +314,7 @@ class GenerationClient:
                     latency_ms=_elapsed_ms(started),
                     retry_count=retry_count,
                     provider_attempt_count=attempts,
+                    result=result,
                 ),
             ) from exc
         observation = _completed_observation(

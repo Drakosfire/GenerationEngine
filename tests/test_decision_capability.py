@@ -177,6 +177,36 @@ async def test_retry_and_malformed_answer_use_existing_public_failures(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_semantically_malformed_answer_keeps_safe_observation_metadata():
+    bad = completed_result(
+        response_model="provider-reported-alias",
+        provider_transport="gateway",
+        provider_request_id="request-123",
+        provider_response_id="response-456",
+        input_tokens=0,
+        cached_input_tokens=0,
+        output_tokens=7,
+        reasoning_tokens=2,
+    )
+    bad.answers["route"].selected = "outside-options"
+    with pytest.raises(GenerationEngineError) as exc:
+        await GenerationClient(decision_providers={"example": FakeDecisionProvider(bad)}).decide(request())
+    assert exc.value.failure.code is FailureCode.MALFORMED_PROVIDER_RESPONSE
+    observed = exc.value.observation
+    assert observed.response_model == "provider-reported-alias"
+    assert observed.provider_transport == "gateway"
+    assert observed.provider_request_id == "request-123"
+    assert observed.provider_response_id == "response-456"
+    assert observed.input_tokens == 0
+    assert observed.cached_input_tokens == 0
+    assert observed.output_tokens == 7
+    assert observed.reasoning_tokens == 2
+    assert observed.provider_attempt_count == 1
+    assert "outside-options" not in exc.value.failure.message
+    assert "outside-options" not in observed.model_dump_json()
+
+
+@pytest.mark.asyncio
 async def test_timeout_and_unexpected_adapter_error_are_normalized():
     for error, code in ((TimeoutError(), FailureCode.PROVIDER_TIMEOUT),
                         (RuntimeError("secret SDK detail"), FailureCode.PROVIDER_ERROR)):
