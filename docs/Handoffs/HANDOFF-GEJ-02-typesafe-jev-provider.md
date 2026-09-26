@@ -1,11 +1,11 @@
 # HANDOFF — GEJ-02 TypeSafe/Jev decision provider
 
-**Status:** DEFERRED DRAFT — stacked on GEJ-01  
-**Repository:** `Drakosfire/GenerationEngine`  
-**Physical base:** `gej/01-generic-decision-capability`  
-**Cross-repo authority:** `Drakosfire/DungeonOverMind/Docs/Plans/STACK-rules-ingestion-generationengine-sidequest.md`  
-**Primary question:** Can GenerationEngine execute the generic decision contract through the official TypeSafe client and current Jev Gateway route while preserving truthful inference-call observations and normalized failures?  
-**Predecessor:** `GEJ_01_GENERIC_DECISION_CAPABILITY_ACCEPTED`  
+**Status:** ACTIVE — implementation lease, pending acceptance
+**Repository:** `Drakosfire/GenerationEngine`
+**Physical base:** `gej/01-generic-decision-capability`
+**Cross-repo authority:** `Drakosfire/DungeonOverMind/Docs/Plans/STACK-rules-ingestion-generationengine-sidequest.md`
+**Primary question:** Can GenerationEngine execute the generic decision contract through the official TypeSafe client and current Jev Gateway route while preserving truthful inference-call observations and normalized failures?
+**Predecessor:** `GEJ_01_GENERIC_DECISION_CAPABILITY_ACCEPTED`
 **Unlocks:** RIGE-01
 
 ## Stack position
@@ -26,7 +26,7 @@ RIGE-04 provider demolition
 RLH-05 resumed review
 ```
 
-At activation, rebase this branch onto the accepted GEJ-01 merge and refresh current TypeSafe SDK/Gateway behavior.
+Activation re-anchor (2026-09-26): GEJ-01 is accepted at PR #15 head `ac476569d296ed34850f66491f62ce2da3aa45f5` but remains unmerged by user instruction. This shell was rebased from its planted predecessor `27ed6cb7a889579b968de8f057a4e34b5ba7ae1f` onto that exact head. GenerationEngine `main` remains `19cf68dceb5f4ec7a3d20e17ae6d5c9c8d7aeaa5`; PR #14 changes governance only and has no implementation-path collision. The official `typesafe-sdk` 0.7.1 has `AsyncTypeSafeClient`, `Noul`, `Choice`, `Score`, and `RetryPolicy(max_retries=0)`. The existing RulesIngestion Jev pilot confirms the current Gateway route and response shapes. This lease includes `uv.lock`, focused provider-contract tests, and an opt-in smoke script required to make the live witness executable. Because CI runs the full test suite with explicit extras, `.github/workflows/ci.yml` must include the new optional extra in its test environment; the provider-free wheel import remains separate.
 
 ## Provider identity
 

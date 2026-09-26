@@ -24,6 +24,9 @@ openrouter = [
 fal = [
     "fal-client>=0.5.6",
 ]
+typesafe = [
+    "typesafe-sdk>=0.7.1,<0.8",
+]
 
 [build-system]
 requires = ["hatchling"]

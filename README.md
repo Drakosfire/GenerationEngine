@@ -14,10 +14,10 @@ GenerationEngine owns inference execution and inference-call truth. Products own
 ## Installation
 
 ```bash
-pip install "generationengine[openai,openrouter,fal] @ git+https://github.com/Drakosfire/GenerationEngine.git"
+pip install "generationengine[openai,openrouter,fal,typesafe] @ git+https://github.com/Drakosfire/GenerationEngine.git"
 ```
 
-Text through OpenAI requires `OPENAI_API_KEY`. Text through OpenRouter requires `OPENROUTER_API_KEY`. Images require `FAL_KEY`. Cloudflare credentials are not used here.
+Text through OpenAI requires `OPENAI_API_KEY`. Text through OpenRouter requires `OPENROUTER_API_KEY`. Images require `FAL_KEY`. TypeSafe decisions require `TYPESAFE_JEV_API_KEY`; the adapter passes it directly to the official async SDK over the Vercel AI Gateway route. Cloudflare credentials are not used here.
 
 ## Quick start
 
@@ -76,6 +76,27 @@ finally:
 
 `generate_structured()` performs GenerationEngine-owned local schema validation and at most one structural repair. OpenAI native JSON Schema is an optimization, not the contract; see [docs/STRUCTURED-CONFORMANCE.md](docs/STRUCTURED-CONFORMANCE.md). OpenRouter uses JSON instructions rather than native `json_schema`.
 
+Typed decisions use the separate `decide()` method. The provider adapter owns SDK mapping and transport; the caller owns state, question wording, and label meaning:
+
+```python
+from generationengine import BinaryDecisionQuestion, DecisionRequest
+
+client = GenerationClient.from_env()
+try:
+    result = await client.decide(DecisionRequest(
+        state={"text": "A sample passage"},
+        questions=(BinaryDecisionQuestion(name="relevant", question="Is it relevant?"),),
+        provider="typesafe",
+        model="typesafe-ai/jev",
+    ))
+    print(result.answers["relevant"].probability_true)
+    print(result.observation.provider_transport)
+finally:
+    await client.aclose()
+```
+
+Run the opt-in live boundary witness with `uv run --extra typesafe --env-file /path/to/.env.development python scripts/smoke_typesafe_decision.py`. It prints typed answers and model/transport/usage metadata without printing credentials.
+
 Ordinary text also supports provider-neutral `max_output_tokens` and schema-less `json_object=True`. JSON-object mode returns raw text with `parsed=None`; products retain parsing/domain/fallback ownership. Labs that need provider-specific controls GE cannot express may still use a bounded direct path.
 
 Image generation returns bytes. Products publish artifacts:
@@ -103,4 +124,5 @@ finally:
 OPENAI_API_KEY=your_openai_key
 OPENROUTER_API_KEY=your_openrouter_key
 FAL_KEY=your_fal_key
+TYPESAFE_JEV_API_KEY=your_gateway_key
 ```
