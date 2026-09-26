@@ -22,6 +22,8 @@ class TextGenerationCall(BaseModel):
     user_prompt: str
     system_prompt: str | None = None
     temperature: float | None = 0.7
+    reasoning_effort: str | None = Field(default=None, min_length=1)
+    max_transport_retries: int | None = Field(default=None, ge=0)
     max_output_tokens: int | None = Field(default=None, ge=1)
     json_object: bool = False
     json_schema: dict[str, Any] | None = None
@@ -55,6 +57,7 @@ class TextGenerationResult(BaseModel):
     input_tokens: int | None = Field(default=None, ge=0)
     cached_input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
+    reasoning_tokens: int | None = Field(default=None, ge=0)
 
 
 @runtime_checkable

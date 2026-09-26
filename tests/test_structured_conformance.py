@@ -178,6 +178,47 @@ async def test_transport_and_conformance_retries_are_distinguishable() -> None:
 
 
 @pytest.mark.asyncio
+async def test_repair_inherits_reasoning_and_retry_ceiling_with_truthful_usage() -> None:
+    provider = ScriptedText(
+        [
+            _result(text="not-json", parsed=None, reasoning_tokens=2),
+            ProviderError.from_code(FailureCode.RATE_LIMITED),
+            _result(reasoning_tokens=3),
+        ]
+    )
+    client = GenerationClient(text_provider=provider)
+    result = await client.generate_structured(
+        _request(
+            reasoning_effort="high",
+            max_transport_retries=1,
+            deadline_ms=10_000,
+        )
+    )
+    assert result.observation.conformance_retry_count == 1
+    assert result.observation.transport_retry_count == 1
+    assert result.observation.provider_attempt_count == 3
+    assert result.observation.reasoning_tokens is None  # retry failure supplied no usage
+    assert [call.reasoning_effort for call in provider.calls] == ["high"] * 3
+    assert [call.max_transport_retries for call in provider.calls] == [1] * 3
+
+
+@pytest.mark.asyncio
+async def test_structured_reasoning_tokens_sum_or_remain_unknown() -> None:
+    for second, expected in ((3, 5), (None, None)):
+        provider = ScriptedText(
+            [
+                _result(text="not-json", parsed=None, reasoning_tokens=2),
+                _result(reasoning_tokens=second),
+            ]
+        )
+        result = await GenerationClient(text_provider=provider).generate_structured(
+            _request(max_transport_retries=0)
+        )
+        assert result.observation.reasoning_tokens == expected
+        assert result.observation.output_tokens == 8
+
+
+@pytest.mark.asyncio
 async def test_repair_preserves_explicit_none_temperature() -> None:
     provider = ScriptedText(
         [

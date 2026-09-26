@@ -48,6 +48,13 @@ positive int     exact provider-neutral output-token ceiling
 
 Provider adapters translate the generic ceiling into provider-native wire vocabulary. GE does not locally truncate text.
 
+`TextRequest.reasoning_effort=None` omits provider reasoning controls; an
+explicit label reaches OpenAI Responses or OpenRouter Chat unchanged, including
+structured repair and streaming. `max_transport_retries=None` preserves two
+transport retries after the first attempt. Explicit nonnegative values set the
+ceiling per non-streaming provider execution within the overall deadline.
+Streaming accepts `None` or `0`; a positive value fails before provider work.
+
 ### Schema-less JSON-object mode
 
 Ordinary `generate_text()` supports `json_object=True`.
@@ -97,6 +104,7 @@ GenerationEngine does not publish artifacts, upload to Cloudflare, or return pro
 - provider/requested/resolved/response model IDs;
 - provider request/response IDs when known;
 - input/cached/output token usage when known;
+- provider-reported reasoning tokens when known (`None` remains unknown);
 - cost when known;
 - operation latency;
 - transport retry count;

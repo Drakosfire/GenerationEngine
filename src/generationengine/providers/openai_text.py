@@ -119,6 +119,8 @@ class OpenAITextProvider:
             kwargs["temperature"] = call.temperature
         if call.max_output_tokens is not None:
             kwargs["max_output_tokens"] = call.max_output_tokens
+        if call.reasoning_effort is not None:
+            kwargs["reasoning"] = {"effort": call.reasoning_effort}
         if call.system_prompt:
             kwargs["instructions"] = call.system_prompt
         if call.json_object:
@@ -147,10 +149,14 @@ class OpenAITextProvider:
         text = getattr(response, "output_text", None)
         usage = getattr(response, "usage", None)
         cached = None
+        reasoning_tokens = None
         if usage is not None:
             input_details = getattr(usage, "input_tokens_details", None)
             if input_details is not None:
                 cached = getattr(input_details, "cached_tokens", None)
+            output_details = getattr(usage, "output_tokens_details", None)
+            if output_details is not None:
+                reasoning_tokens = getattr(output_details, "reasoning_tokens", None)
         return TextGenerationResult(
             text=text,
             parsed=None,
@@ -160,6 +166,7 @@ class OpenAITextProvider:
             input_tokens=getattr(usage, "input_tokens", None) if usage else None,
             cached_input_tokens=cached,
             output_tokens=getattr(usage, "output_tokens", None) if usage else None,
+            reasoning_tokens=reasoning_tokens,
         )
 
     def _map_exception(self, exc: Exception) -> ProviderError:
@@ -187,6 +194,7 @@ def _completed_observation(result: TextGenerationResult) -> InferenceObservation
         input_tokens=result.input_tokens,
         cached_input_tokens=result.cached_input_tokens,
         output_tokens=result.output_tokens,
+        reasoning_tokens=result.reasoning_tokens,
         latency_ms=0,
         retry_count=0,
         state=ObservationState.COMPLETED,

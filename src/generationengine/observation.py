@@ -50,6 +50,7 @@ class InferenceObservation(BaseModel):
     input_tokens: int | None = Field(default=None, ge=0)
     cached_input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
+    reasoning_tokens: int | None = Field(default=None, ge=0)
     cost_usd: float | None = Field(default=None, ge=0.0)
     latency_ms: int = Field(..., ge=0)
     retry_count: int = Field(..., ge=0, description="Transport retries: additional provider attempts after the first try of a provider call")

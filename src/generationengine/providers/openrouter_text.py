@@ -125,6 +125,8 @@ class OpenRouterTextProvider:
             kwargs["temperature"] = call.temperature
         if call.max_output_tokens is not None:
             kwargs["max_completion_tokens"] = call.max_output_tokens
+        if call.reasoning_effort is not None:
+            kwargs["extra_body"] = {"reasoning": {"effort": call.reasoning_effort}}
         if call.json_object:
             kwargs["response_format"] = {"type": "json_object"}
         if streaming:
@@ -165,13 +167,21 @@ def _usage_fields(usage: Any) -> dict[str, int | None]:
             "input_tokens": None,
             "cached_input_tokens": None,
             "output_tokens": None,
+            "reasoning_tokens": None,
         }
     details = getattr(usage, "prompt_tokens_details", None)
     cached = getattr(details, "cached_tokens", None) if details is not None else None
+    completion_details = getattr(usage, "completion_tokens_details", None)
+    reasoning_tokens = (
+        getattr(completion_details, "reasoning_tokens", None)
+        if completion_details is not None
+        else None
+    )
     return {
         "input_tokens": getattr(usage, "prompt_tokens", None),
         "cached_input_tokens": cached,
         "output_tokens": getattr(usage, "completion_tokens", None),
+        "reasoning_tokens": reasoning_tokens,
     }
 
 
@@ -196,6 +206,7 @@ def _completed_observation(result: TextGenerationResult) -> InferenceObservation
         input_tokens=result.input_tokens,
         cached_input_tokens=result.cached_input_tokens,
         output_tokens=result.output_tokens,
+        reasoning_tokens=result.reasoning_tokens,
         latency_ms=0,
         retry_count=0,
         state=ObservationState.COMPLETED,

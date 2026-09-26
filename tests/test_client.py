@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from collections.abc import AsyncIterator
 
 import pytest
+from pydantic import ValidationError
 
 from generationengine import (
     Capability,
@@ -515,6 +517,143 @@ async def test_rate_limit_retries_then_succeeds() -> None:
     assert result.text == "recovered"
     assert result.observation.retry_count == 1
     assert provider.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_explicit_transport_retry_ceiling_and_reasoning_pass_through() -> None:
+    for ceiling, expected_calls in ((0, 1), (1, 2), (3, 4)):
+        provider = FakeTextProvider(
+            errors=[ProviderError.from_code(FailureCode.RATE_LIMITED) for _ in range(expected_calls)]
+        )
+        client = GenerationClient(text_provider=provider)
+        with pytest.raises(GenerationEngineError) as exc:
+            await client.generate_text(
+                TextRequest(
+                    user_prompt="hi",
+                    profile=InferenceProfile.TEXT_FAST,
+                    reasoning_effort="high",
+                    max_transport_retries=ceiling,
+                    deadline_ms=10_000,
+                )
+            )
+        assert provider.calls == expected_calls
+        assert exc.value.observation.retry_count == ceiling
+        assert all(call.reasoning_effort == "high" for call in provider.seen_calls)
+        assert all(call.max_transport_retries == ceiling for call in provider.seen_calls)
+
+    assert TextRequest(user_prompt="hi").max_transport_retries is None
+    assert TextRequest(user_prompt="hi").reasoning_effort is None
+    with pytest.raises(ValidationError):
+        TextRequest(user_prompt="hi", max_transport_retries=-1)
+    with pytest.raises(ValidationError):
+        TextRequest(user_prompt="hi", reasoning_effort="")
+
+
+@pytest.mark.asyncio
+async def test_nonretryable_error_and_deadline_bound_requested_retries() -> None:
+    nonretryable = FakeTextProvider(
+        errors=[ProviderError.from_code(FailureCode.INVALID_REQUEST, "Invalid provider request.")]
+    )
+    with pytest.raises(GenerationEngineError):
+        await GenerationClient(text_provider=nonretryable).generate_text(
+            TextRequest(
+                user_prompt="hi",
+                profile=InferenceProfile.TEXT_FAST,
+                max_transport_retries=3,
+            )
+        )
+    assert nonretryable.calls == 1
+
+    class SlowProvider(FakeTextProvider):
+        async def generate(self, call: TextGenerationCall) -> TextGenerationResult:
+            self.calls += 1
+            await asyncio.sleep(0.02)
+            return TextGenerationResult(text="late")
+
+    slow = SlowProvider()
+    with pytest.raises(GenerationEngineError) as exc:
+        await GenerationClient(text_provider=slow).generate_text(
+            TextRequest(
+                user_prompt="hi",
+                profile=InferenceProfile.TEXT_FAST,
+                max_transport_retries=3,
+                deadline_ms=1,
+            )
+        )
+    assert exc.value.failure.code is FailureCode.PROVIDER_TIMEOUT
+    assert slow.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_positive_retry_rejected_before_provider_and_zero_keeps_stream() -> None:
+    provider = FakeTextProvider()
+    client = GenerationClient(text_provider=provider)
+    events = [
+        event async for event in client.stream_text(
+            TextRequest(user_prompt="hi", max_transport_retries=1)
+        )
+    ]
+    assert len(events) == 1
+    assert isinstance(events[0], TextFailed)
+    assert events[0].failure.code is FailureCode.INVALID_REQUEST
+    assert events[0].observation.provider_attempt_count == 0
+    assert provider.calls == 0
+    assert client._text_providers == {"openai": provider}
+
+    lazy_client = GenerationClient.from_env()
+    lazy_events = [
+        event async for event in lazy_client.stream_text(
+            TextRequest(user_prompt="hi", max_transport_retries=1)
+        )
+    ]
+    assert len(lazy_events) == 1
+    assert isinstance(lazy_events[0], TextFailed)
+    assert lazy_client._text_providers == {}
+
+    events = [
+        event async for event in client.stream_text(
+            TextRequest(
+                user_prompt="hi",
+                profile=InferenceProfile.TEXT_FAST,
+                reasoning_effort="low",
+                max_transport_retries=0,
+            )
+        )
+    ]
+    assert isinstance(events[-1], TextCompleted)
+    assert provider.seen_calls[0].reasoning_effort == "low"
+
+
+@pytest.mark.asyncio
+async def test_ordinary_and_stream_reasoning_usage_is_observed() -> None:
+    provider = FakeTextProvider(
+        results=[TextGenerationResult(text="ok", reasoning_tokens=0)]
+    )
+    result = await GenerationClient(text_provider=provider).generate_text(
+        TextRequest(user_prompt="hi", profile=InferenceProfile.TEXT_FAST)
+    )
+    assert result.observation.reasoning_tokens == 0
+
+    class StreamUsageProvider(FakeTextProvider):
+        async def stream(self, call: TextGenerationCall) -> AsyncIterator[TextStreamEvent]:
+            yield TextCompleted(
+                final_text="ok",
+                observation=InferenceObservation(
+                    provider="openai",
+                    reasoning_tokens=7,
+                    latency_ms=0,
+                    retry_count=0,
+                    state=ObservationState.COMPLETED,
+                ),
+            )
+
+    events = [
+        event async for event in GenerationClient(
+            text_provider=StreamUsageProvider()
+        ).stream_text(TextRequest(user_prompt="hi", profile=InferenceProfile.TEXT_FAST))
+    ]
+    assert isinstance(events[-1], TextCompleted)
+    assert events[-1].observation.reasoning_tokens == 7
 
 
 @pytest.mark.asyncio

@@ -27,6 +27,8 @@ class TextRequest(BaseModel):
     provider: str | None = None
     model: str | None = None
     temperature: float | None = 0.7
+    reasoning_effort: str | None = Field(default=None, min_length=1)
+    max_transport_retries: int | None = Field(default=None, ge=0)
     max_output_tokens: int | None = Field(
         default=None,
         ge=1,
