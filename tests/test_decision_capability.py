@@ -70,6 +70,12 @@ def test_binary_choice_score_validation_and_json_state():
     with pytest.raises(ValidationError):
         ChoiceDecisionQuestion(name="x", question="Choose?", options=("a", "a"))
     with pytest.raises(ValidationError):
+        ChoiceDecisionQuestion(name="x", question="Choose?", options=("a", "b"),
+                               option_descriptions={"a": "one"})
+    described = ChoiceDecisionQuestion(name="x", question="Choose?", options=("a", "b"),
+                                       option_descriptions={"a": "one", "b": None})
+    assert described.option_descriptions == {"a": "one", "b": None}
+    with pytest.raises(ValidationError):
         DecisionRequest(state={"bad": float("nan")}, questions=questions(),
                         provider="example", model="x")
     with pytest.raises(ValidationError):

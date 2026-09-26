@@ -184,3 +184,5 @@ Stop and revise architecture if implementing decisions requires:
 - Remaining limitation: the public seam is usable with an injected `DecisionProvider`; `GenerationClient.from_env()` has no decision provider until GEJ-02. This is the planned dependency, not a GEJ-01 acceptance failure.
 
 Acceptance token satisfied: `GEJ_01_GENERIC_DECISION_CAPABILITY_ACCEPTED`.
+
+Follow-up contract correction (2026-09-26): RIGE-01 re-anchor found that the existing occupancy Choice criteria contain caller-owned descriptions for each label. The generic GEJ-01 question now carries optional `option_descriptions` with exact label alignment so the migration preserves that meaning. This is provider-neutral and within the original Choice contract. The GEJ-02 branch must be restacked onto this amendment before RIGE-01 activation.

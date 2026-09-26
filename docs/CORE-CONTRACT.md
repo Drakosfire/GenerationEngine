@@ -67,7 +67,7 @@ Embeddings, transcription, speech, and moderation are out of this contract until
 
 ### Typed decision capability
 
-`GenerationClient.decide(DecisionRequest)` is separate from text and structured-text generation. A request supplies JSON-safe state, one or more uniquely named Binary, Choice, or Score questions, an explicit provider and model, and optional overall deadline/transport-retry controls. Choice options and Score levels are ordered, distinct labels; Score requires at least two levels. Products own the question wording and label meaning.
+`GenerationClient.decide(DecisionRequest)` is separate from text and structured-text generation. A request supplies JSON-safe state, one or more uniquely named Binary, Choice, or Score questions, an explicit provider and model, and optional overall deadline/transport-retry controls. Choice options and Score levels are ordered, distinct labels; Score requires at least two levels. Choice questions may include a description for every option to preserve the caller's meaning. Products own the question wording and label meaning.
 
 The `DecisionProvider` protocol receives a provider-neutral `DecisionGenerationCall` and returns typed answers plus provider-call metadata. The client validates exact answer-name/kind alignment, choice membership, distribution labels/probabilities, and finite scores. A malformed provider answer becomes `MALFORMED_PROVIDER_RESPONSE`; invalid caller input becomes `INVALID_REQUEST`. A provider capability not wired for decisions becomes `UNSUPPORTED_CAPABILITY`. There is no text-generation fallback or generic decision profile in this slice. One `decide()` operation yields one `InferenceObservation` across transport retries.
 

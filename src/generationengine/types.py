@@ -73,10 +73,16 @@ class ChoiceDecisionQuestion(BaseModel):
     name: str = Field(min_length=1)
     question: str = Field(min_length=1)
     options: tuple[str, ...]
+    option_descriptions: dict[str, str | None] | None = None
 
     @model_validator(mode="after")
     def validate_options(self) -> ChoiceDecisionQuestion:
         _validate_labels(self.options)
+        if self.option_descriptions is not None and (
+            set(self.option_descriptions) != set(self.options)
+            or any(value is not None and not value.strip() for value in self.option_descriptions.values())
+        ):
+            raise ValueError("Choice descriptions must cover exactly the named options")
         return self
 
 
