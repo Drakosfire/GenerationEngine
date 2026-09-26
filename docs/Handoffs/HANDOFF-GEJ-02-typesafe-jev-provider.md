@@ -1,6 +1,6 @@
 # HANDOFF — GEJ-02 TypeSafe/Jev decision provider
 
-**Status:** READY FOR REVIEW — acceptance witnessed; do not merge before review
+**Status:** READY FOR RE-REVIEW — review blocker fixed; do not merge before review
 **Repository:** `Drakosfire/GenerationEngine`
 **Physical base:** `gej/01-generic-decision-capability`
 **Cross-repo authority:** `Drakosfire/DungeonOverMind/Docs/Plans/STACK-rules-ingestion-generationengine-sidequest.md`
@@ -168,4 +168,14 @@ Stop instead of widening if:
 - Lease adjustments identified at activation: `uv.lock`, `scripts/smoke_typesafe_decision.py`, the CI extra, and the optional-dependency invariant test. The cumulative diff was reviewed against the exact GEJ-01 base and `git diff --check` passed.
 - Limitation: the current TypeSafe API accepts text, object, or array state. This adapter rejects other JSON scalar states as `INVALID_REQUEST`; the provider-neutral GE decision contract remains broader.
 
-Acceptance token satisfied: `GEJ_02_TYPESAFE_JEV_PROVIDER_ACCEPTED`.
+The evidence above records the prior reviewed head. Its acceptance claim was withdrawn after review comment `5848291530` identified lost observation metadata on locally malformed answers.
+
+## Review correction and re-review evidence (2026-09-26)
+
+- Exact corrected predecessor and PR base: GEJ-01 `87d49c20c84983267dd7044b350e68806e10383c`. This branch was cleanly restacked from the prior GEJ-01 head `11acfa8dddb4366e85933d40f7c3801c24f6451f`; `git merge-base` confirms the corrected predecessor.
+- Tested implementation head: `c5aaea2558d615adb5acebad684dba499015e70c`. The TypeSafe adapter now captures only validated response model, request ID, token usage, and Gateway transport before answer normalization. A rejected Score legend preserves those fields through the public `GenerationEngineError.observation` without exposing the malformed legend or response body.
+- Focused decision and TypeSafe tests: 15 passed. Full Python 3.11 and 3.13 suites: 183 passed each. On each version, `uv lock --check`, locked sync with the CI extras, Ruff, and `uv build` passed. The provider-free wheel import remains covered by the full suite.
+- Live Gateway smoke passed again with Binary, Choice, and Score answers; `provider=typesafe`, `provider_transport=vercel_ai_gateway`, requested/resolved/response model `typesafe-ai/jev`, 351 input tokens and 65 output tokens. No credential was emitted.
+- Cumulative diff against the exact corrected GEJ-01 base contains only GEJ-02's provider adapter, optional package/CI wiring, docs/handoff, smoke script, and tests. `git diff --check` passed.
+
+Acceptance token `GEJ_02_TYPESAFE_JEV_PROVIDER_ACCEPTED` is pending re-review of this corrected head.
