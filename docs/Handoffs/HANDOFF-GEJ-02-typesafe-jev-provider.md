@@ -179,3 +179,13 @@ The evidence above records the prior reviewed head. Its acceptance claim was wit
 - Cumulative diff against the exact corrected GEJ-01 base contains only GEJ-02's provider adapter, optional package/CI wiring, docs/handoff, smoke script, and tests. `git diff --check` passed.
 
 Acceptance token `GEJ_02_TYPESAFE_JEV_PROVIDER_ACCEPTED` is pending re-review of this corrected head.
+
+## Optional usage correction and re-review evidence (2026-09-26)
+
+- Review comment `5848629392` identified a second provider-contract issue: the SDK permits unknown input/output token counts. The prior adapter incorrectly classified those valid responses as malformed.
+- Tested implementation head: `e38a6e7f1361a73e1520dacc7b130a42521ee120`; exact intended base remains accepted GEJ-01 `87d49c20c84983267dd7044b350e68806e10383c`. The adapter still requires a valid response model, now passes unknown usage counts as `None`, and rejects negative or incorrectly typed counts.
+- A real `SystemOneResponse` validated with both token counts unknown now succeeds through `GenerationClient.decide` and retains unknown observation usage. Parameterized tests show negative, string, and boolean counts fail closed as `MALFORMED_PROVIDER_RESPONSE`.
+- Focused TypeSafe and decision tests: 20 passed. Full Python 3.11 and 3.13 CI-equivalent suites: 188 passed each; `uv lock --check`, locked sync with CI extras, Ruff, and `uv build` passed on both. The provider-free wheel import remains in the full suite.
+- Cumulative diff remains limited to GEJ-02's adapter, optional package/CI wiring, docs/handoff, smoke script, and tests; `git diff --check` passed. The previous live Gateway witness remains valid because this correction concerns absent usage fields and changes no request mapping.
+
+Acceptance token `GEJ_02_TYPESAFE_JEV_PROVIDER_ACCEPTED` remains pending exact-head re-review. Do not merge before review.
