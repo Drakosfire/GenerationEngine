@@ -1,6 +1,6 @@
 # HANDOFF — GEJ-01 Generic typed-decision capability
 
-**Status:** READY FOR REVIEW — acceptance witnessed; do not merge before review
+**Status:** READY FOR RE-REVIEW — review blocker fixed; do not merge before review
 **Repository:** `Drakosfire/GenerationEngine`
 **Creation anchor:** `main@19cf68dceb5f4ec7a3d20e17ae6d5c9c8d7aeaa5`
 **Cross-repo authority:** `Drakosfire/DungeonOverMind/Docs/Plans/STACK-rules-ingestion-generationengine-sidequest.md`
@@ -183,6 +183,8 @@ Stop and revise architecture if implementing decisions requires:
 - Focused decision/public surface/explicit target tests passed. CI gates passed on both Python 3.11 and 3.13: `uv lock --check`, `ruff check .`, and `pytest -q` (175 passed on each). `uv build` produced source and wheel distributions; the full test suite's isolated wheel-import test passed. No separate static type-check gate is configured in CI.
 - Remaining limitation: the public seam is usable with an injected `DecisionProvider`; `GenerationClient.from_env()` has no decision provider until GEJ-02. This is the planned dependency, not a GEJ-01 acceptance failure.
 
-Acceptance token satisfied: `GEJ_01_GENERIC_DECISION_CAPABILITY_ACCEPTED`.
+Earlier acceptance claim was held by exact-head review at `11acfa8dddb4366e85933d40f7c3801c24f6451f`; see the review correction below. The token `GEJ_01_GENERIC_DECISION_CAPABILITY_ACCEPTED` awaits re-review.
 
 Follow-up contract correction (2026-09-26): RIGE-01 re-anchor found that the existing occupancy Choice criteria contain caller-owned descriptions for each label. The generic GEJ-01 question now carries optional `option_descriptions` with exact label alignment so the migration preserves that meaning. This is provider-neutral and within the original Choice contract. The GEJ-02 branch must be restacked onto this amendment before RIGE-01 activation.
+
+Review correction (2026-09-26): exact-head review comment `5848275116` found that semantic validation of a structurally parsed decision result dropped known inference-call metadata on `MALFORMED_PROVIDER_RESPONSE`. Tested implementation commit `6cf305966dec2a3fe81d172f4a0826ebac4352dd` passes only the parsed `DecisionGenerationResult` metadata into the failure observation; a structural parse failure still contributes no untrusted raw response. The regression checks response model, transport, request/response IDs, token usage including known zero, attempt count, and absence of the malformed Choice label from both public failure and observation. Exact-base cumulative diff and `git diff --check` pass. Python 3.11 and 3.13 gates each pass `uv lock --check`, Ruff, full pytest (176 passed), build, and the suite's provider-free wheel import. The following handoff-only evidence commit will become the PR head. Reviewer re-acceptance remains pending.
