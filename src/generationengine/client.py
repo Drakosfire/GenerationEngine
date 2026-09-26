@@ -22,6 +22,7 @@ from generationengine.providers.base import (
     TextCompleted,
     TextFailed,
     TextGenerationCall,
+    TextGenerationResult,
     TextProvider,
     TextStreamEvent,
 )
@@ -378,11 +379,18 @@ class GenerationClient:
             raise _config_error(exc.failure, request=request) from exc
         provider = self._text_provider_for(resolution.provider)
         call = _text_call(request, resolution.provider_model_id)
+        provider_attempt_count = 0
+
+        async def attempt() -> TextGenerationResult:
+            nonlocal provider_attempt_count
+            provider_attempt_count += 1
+            return await provider.generate(call)
+
         try:
             result, retry_count = await _execute_with_retries(
                 started=started,
                 deadline_s=deadline_s,
-                attempt=lambda: provider.generate(call),
+                attempt=attempt,
                 max_transport_retries=request.max_transport_retries,
             )
         except ProviderError as exc:
@@ -394,6 +402,7 @@ class GenerationClient:
                     resolution=resolution,
                     latency_ms=_elapsed_ms(started),
                     retry_count=_retry_count_from_error(exc),
+                    provider_attempt_count=provider_attempt_count,
                     result=exc,
                 ),
             ) from exc

@@ -520,6 +520,23 @@ async def test_rate_limit_retries_then_succeeds() -> None:
 
 
 @pytest.mark.asyncio
+async def test_default_retry_terminal_failure_reports_all_provider_attempts() -> None:
+    provider = FakeTextProvider(
+        errors=[ProviderError.from_code(FailureCode.RATE_LIMITED) for _ in range(3)]
+    )
+    client = GenerationClient(text_provider=provider)
+
+    with pytest.raises(GenerationEngineError) as exc:
+        await client.generate_text(
+            TextRequest(user_prompt="hi", profile=InferenceProfile.TEXT_FAST, deadline_ms=10_000)
+        )
+
+    assert provider.calls == 3
+    assert exc.value.observation.retry_count == 2
+    assert exc.value.observation.provider_attempt_count == 3
+
+
+@pytest.mark.asyncio
 async def test_explicit_transport_retry_ceiling_and_reasoning_pass_through() -> None:
     for ceiling, expected_calls in ((0, 1), (1, 2), (3, 4)):
         provider = FakeTextProvider(
@@ -538,6 +555,7 @@ async def test_explicit_transport_retry_ceiling_and_reasoning_pass_through() -> 
             )
         assert provider.calls == expected_calls
         assert exc.value.observation.retry_count == ceiling
+        assert exc.value.observation.provider_attempt_count == expected_calls
         assert all(call.reasoning_effort == "high" for call in provider.seen_calls)
         assert all(call.max_transport_retries == ceiling for call in provider.seen_calls)
 
@@ -554,7 +572,7 @@ async def test_nonretryable_error_and_deadline_bound_requested_retries() -> None
     nonretryable = FakeTextProvider(
         errors=[ProviderError.from_code(FailureCode.INVALID_REQUEST, "Invalid provider request.")]
     )
-    with pytest.raises(GenerationEngineError):
+    with pytest.raises(GenerationEngineError) as nonretryable_exc:
         await GenerationClient(text_provider=nonretryable).generate_text(
             TextRequest(
                 user_prompt="hi",
@@ -563,6 +581,7 @@ async def test_nonretryable_error_and_deadline_bound_requested_retries() -> None
             )
         )
     assert nonretryable.calls == 1
+    assert nonretryable_exc.value.observation.provider_attempt_count == 1
 
     class SlowProvider(FakeTextProvider):
         async def generate(self, call: TextGenerationCall) -> TextGenerationResult:
@@ -581,7 +600,9 @@ async def test_nonretryable_error_and_deadline_bound_requested_retries() -> None
             )
         )
     assert exc.value.failure.code is FailureCode.PROVIDER_TIMEOUT
-    assert slow.calls == 1
+    # A short deadline may expire before the coroutine enters the provider.
+    assert slow.calls <= 1
+    assert exc.value.observation.provider_attempt_count == slow.calls
 
 
 @pytest.mark.asyncio
