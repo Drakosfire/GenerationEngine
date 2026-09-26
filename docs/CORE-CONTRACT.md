@@ -100,6 +100,28 @@ The requested ceiling is configuration, not measured usage, and is therefore
 not part of `InferenceObservation`. Actual provider-reported `output_tokens`
 remains observation truth.
 
+### Reasoning effort and transport retries
+
+`TextRequest.reasoning_effort` and `TextGenerationCall.reasoning_effort` are
+`str | None` and default to `None`. The default omits provider reasoning
+controls. An explicit effort label is forwarded unchanged for ordinary,
+structured, repair, and streaming text. OpenAI Responses receives
+`reasoning={"effort": label}`; OpenRouter Chat receives the same reasoning
+object through adapter-local `extra_body`. Model-specific support is decided
+by the provider.
+
+`TextRequest.max_transport_retries` and `TextGenerationCall.max_transport_retries`
+are nonnegative `int | None` fields. `None` preserves the existing ceiling of
+two transport retries after the first attempt. An explicit `N` permits at most
+`N` transport retries for each non-streaming provider execution, within the
+same overall deadline. Structured repair uses the same ceiling for its own
+provider execution. Retryability and backoff are unchanged; provider SDK
+retries remain disabled.
+
+Streaming remains no-retry. `None` and `0` preserve streaming behavior. A
+positive retry ceiling yields one `INVALID_REQUEST` terminal before provider
+construction, with zero provider attempts.
+
 ### Schema-less JSON-object mode
 
 `TextRequest.json_object` and `TextGenerationCall.json_object` are
@@ -267,6 +289,7 @@ InferenceObservation
   input_tokens          int | None
   cached_input_tokens   int | None
   output_tokens         int | None
+  reasoning_tokens      int | None
   cost_usd              float | None
   latency_ms            int
   retry_count           int              # transport retries; backward compatible
@@ -285,6 +308,8 @@ Python names may differ; semantics must not.
 - `None` means the provider or layer did not supply the value
 - `0` means the provider supplied zero
 - missing usage must not become `0` just to satisfy a numeric field
+- reasoning tokens are an additional output-token breakdown; unknown stays
+  `None` and an explicit provider zero stays `0`
 - `latency_ms` and `retry_count` are always known to GenerationEngine because it owns the call loop
 
 ### Latency
@@ -296,6 +321,11 @@ Python names may differ; semantics must not.
 `retry_count` is the number of **additional transport** attempts after the first try of a provider call. `0` means the first attempt produced the final provider result (success or non-retryable failure). Exhausting a 3-attempt policy yields `retry_count == 2` if two retries ran, not a hard-coded `3`.
 
 Structured generation may also issue a **conformance retry** after a successful provider call returned structurally invalid output. That is not a transport retry. `conformance_retry_count` counts those repairs. `provider_attempt_count` counts every provider generate invocation across both reasons.
+
+OpenAI `usage.output_tokens_details.reasoning_tokens` and OpenRouter
+`usage.completion_tokens_details.reasoning_tokens` populate the optional
+reasoning count. Structured attempts sum it only when every provider attempt
+reports it; one unknown attempt makes the aggregate `None`.
 
 ### Multiple provider calls
 

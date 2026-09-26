@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from generationengine.providers.base import TextGenerationCall
+from generationengine.providers.base import TextCompleted, TextGenerationCall
 from generationengine.providers.openai_text import OpenAITextProvider, _ids_from_response
 
 
@@ -198,6 +198,56 @@ def test_openai_zero_temperature_is_forwarded() -> None:
 def test_openai_none_temperature_omits_provider_field() -> None:
     kwargs = _openai_kwargs(_openai_call(temperature=None))
     assert "temperature" not in kwargs
+
+
+def test_openai_reasoning_wire_and_usage_truth() -> None:
+    assert "reasoning" not in _openai_kwargs(_openai_call())
+    for streaming in (False, True):
+        kwargs = _openai_kwargs(
+            _openai_call(reasoning_effort="high"), streaming=streaming
+        )
+        assert kwargs["reasoning"] == {"effort": "high"}
+
+    response = _sdk_response(text="ok")
+    response.usage.output_tokens_details = SimpleNamespace(reasoning_tokens=0)
+    result = OpenAITextProvider(client=SimpleNamespace())._result_from_response(response)
+    assert result.reasoning_tokens == 0
+    response.usage.output_tokens_details = SimpleNamespace(reasoning_tokens=7)
+    result = OpenAITextProvider(client=SimpleNamespace())._result_from_response(response)
+    assert result.reasoning_tokens == 7
+    del response.usage.output_tokens_details
+    assert OpenAITextProvider(client=SimpleNamespace())._result_from_response(response).reasoning_tokens is None
+
+
+@pytest.mark.asyncio
+async def test_openai_stream_reports_reasoning_tokens() -> None:
+    response = _sdk_response(text="ok")
+    response.usage.output_tokens_details = SimpleNamespace(reasoning_tokens=4)
+
+    class StreamManager:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        def __aiter__(self):
+            async def events():
+                yield SimpleNamespace(type="response.completed", response=response)
+
+            return events()
+
+    provider = OpenAITextProvider(
+        client=SimpleNamespace(responses=SimpleNamespace(stream=lambda **_kwargs: StreamManager()))
+    )
+    events = [
+        event async for event in provider.stream(
+            _openai_call(reasoning_effort="medium")
+        )
+    ]
+    assert len(events) == 1
+    assert isinstance(events[0], TextCompleted)
+    assert events[0].observation.reasoning_tokens == 4
 
 
 def test_openai_stream_none_temperature_omits_provider_field() -> None:

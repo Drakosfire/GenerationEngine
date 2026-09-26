@@ -168,6 +168,26 @@ def test_openrouter_none_output_ceiling_omits_provider_field() -> None:
     assert "max_completion_tokens" not in kwargs
 
 
+def test_openrouter_reasoning_wire_and_usage_truth() -> None:
+    provider = OpenRouterTextProvider(client=SimpleNamespace())
+    call = TextGenerationCall(model="deepseek/deepseek-v4.1-flash", user_prompt="hi")
+    assert "extra_body" not in provider._request_kwargs(call)
+    for streaming in (False, True):
+        kwargs = provider._request_kwargs(
+            call.model_copy(update={"reasoning_effort": "medium"}),
+            streaming=streaming,
+        )
+        assert kwargs["extra_body"] == {"reasoning": {"effort": "medium"}}
+
+    response = _chat_response()
+    response.usage.completion_tokens_details = SimpleNamespace(reasoning_tokens=0)
+    assert provider._result_from_response(response).reasoning_tokens == 0
+    response.usage.completion_tokens_details = SimpleNamespace(reasoning_tokens=5)
+    assert provider._result_from_response(response).reasoning_tokens == 5
+    del response.usage.completion_tokens_details
+    assert provider._result_from_response(response).reasoning_tokens is None
+
+
 def test_openrouter_output_ceiling_maps_to_completion_tokens() -> None:
     provider = OpenRouterTextProvider(client=SimpleNamespace())
     kwargs = provider._request_kwargs(
@@ -353,6 +373,7 @@ async def test_openrouter_stream_keeps_provider_identity() -> None:
                         prompt_tokens=1,
                         completion_tokens=1,
                         prompt_tokens_details=None,
+                        completion_tokens_details=SimpleNamespace(reasoning_tokens=0),
                     ),
                     choices=[SimpleNamespace(delta=SimpleNamespace(content=None), finish_reason="stop")],
                 )
@@ -375,6 +396,7 @@ async def test_openrouter_stream_keeps_provider_identity() -> None:
     assert events[-1].observation.provider == "openrouter"
     assert events[-1].observation.state is ObservationState.COMPLETED
     assert events[-1].observation.provider_request_id == "req-or"
+    assert events[-1].observation.reasoning_tokens == 0
 
 
 @pytest.mark.asyncio

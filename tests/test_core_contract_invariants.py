@@ -84,6 +84,7 @@ def test_inference_observation_fields_are_specified() -> None:
         "input_tokens",
         "cached_input_tokens",
         "output_tokens",
+        "reasoning_tokens",
         "cost_usd",
         "latency_ms",
         "retry_count",
