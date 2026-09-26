@@ -2,7 +2,7 @@
 
 **Status:** READY FOR RE-REVIEW — review blocker fixed; do not merge before review
 **Repository:** `Drakosfire/GenerationEngine`
-**Physical base:** `gej/01-generic-decision-capability`
+**Physical PR base:** `main` after GEJ-01 PR #15 and governance PR #14 merged
 **Cross-repo authority:** `Drakosfire/DungeonOverMind/Docs/Plans/STACK-rules-ingestion-generationengine-sidequest.md`
 **Primary question:** Can GenerationEngine execute the generic decision contract through the official TypeSafe client and current Jev Gateway route while preserving truthful inference-call observations and normalized failures?
 **Predecessor:** `GEJ_01_GENERIC_DECISION_CAPABILITY_ACCEPTED`
@@ -26,7 +26,7 @@ RIGE-04 provider demolition
 RLH-05 resumed review
 ```
 
-Activation re-anchor (2026-09-26): GEJ-01 is accepted at PR #15 head `11acfa8dddb4366e85933d40f7c3801c24f6451f` but remains unmerged by user instruction. This shell was rebased from its planted predecessor `27ed6cb7a889579b968de8f057a4e34b5ba7ae1f` onto GEJ-01, then restacked onto its Choice-description amendment after RIGE-01 exposed the need to preserve label meaning. GenerationEngine `main` remains `19cf68dceb5f4ec7a3d20e17ae6d5c9c8d7aeaa5`; PR #14 changes governance only and has no implementation-path collision. The official `typesafe-sdk` 0.7.1 has `AsyncTypeSafeClient`, `Noul`, `Choice`, `Score`, and `RetryPolicy(max_retries=0)`. The existing RulesIngestion Jev pilot confirms the current Gateway route and response shapes. This lease includes `uv.lock`, focused provider-contract tests, and an opt-in smoke script required to make the live witness executable. Because CI runs the full test suite with explicit extras, `.github/workflows/ci.yml` must include the new optional extra in its test environment; the provider-free wheel import remains separate.
+Current re-anchor (2026-09-26): GEJ-01 PR #15 was accepted at head `87d49c20c84983267dd7044b350e68806e10383c` and merged as `bb593c1fbeaff6344e7e07825952bf8b135fb962`. Governance PR #14 also merged as `4d54d7fa8990ed243e28d0acecff61e02a9dbde2`. GEJ-02 was originally stacked on GEJ-01; its PR now targets `main`, and its branch incorporates current `main` for integration review. The official `typesafe-sdk` 0.7.1 has `AsyncTypeSafeClient`, `Noul`, `Choice`, `Score`, and `RetryPolicy(max_retries=0)`. The existing RulesIngestion Jev pilot confirms the current Gateway route and response shapes. This lease includes `uv.lock`, focused provider-contract tests, and an opt-in smoke script required to make the live witness executable. Because CI runs the full test suite with explicit extras, `.github/workflows/ci.yml` must include the new optional extra in its test environment; the provider-free wheel import remains separate.
 
 ## Provider identity
 
