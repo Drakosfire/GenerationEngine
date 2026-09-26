@@ -86,25 +86,23 @@ class TypeSafeDecisionProvider:
             )
         except Exception as exc:
             raise _map_exception(exc) from exc
+        metadata = _response_metadata(response)
         try:
             answers = _answers(call, response)
             usage = response.usage
-            response_model = response.model
-            if not isinstance(response_model, str) or not response_model.strip():
+            if metadata["response_model"] is None:
                 raise ValueError("Missing response model")
+            if usage is None or metadata["input_tokens"] is None or metadata["output_tokens"] is None:
+                raise ValueError("Invalid response usage")
             return DecisionGenerationResult(
                 answers=answers,
-                provider_request_id=_request_id(response),
-                response_model=response_model,
-                provider_transport=TRANSPORT,
-                input_tokens=usage.input_tokens,
-                output_tokens=usage.output_tokens,
+                **metadata,
             )
         except (AttributeError, IndexError, KeyError, TypeError, ValueError) as exc:
             raise ProviderError.from_code(
                 FailureCode.MALFORMED_PROVIDER_RESPONSE,
                 "TypeSafe returned an invalid decision response.",
-                provider_transport=TRANSPORT,
+                **metadata,
             ) from exc
 
 
@@ -171,9 +169,25 @@ def _answers(call: DecisionGenerationCall, response: Any) -> dict[str, Any]:
 
 def _request_id(response: Any) -> str | None:
     try:
-        return response.request_id
+        request_id = response.request_id
+        return request_id if isinstance(request_id, str) and request_id.strip() else None
     except (AttributeError, TypeSafeError):
         return None
+
+
+def _response_metadata(response: Any) -> dict[str, Any]:
+    """Retain only validated observation fields, never answer or response bodies."""
+    model = getattr(response, "model", None)
+    usage = getattr(response, "usage", None)
+    input_tokens = getattr(usage, "input_tokens", None)
+    output_tokens = getattr(usage, "output_tokens", None)
+    return {
+        "provider_request_id": _request_id(response),
+        "response_model": model if isinstance(model, str) and model.strip() else None,
+        "provider_transport": TRANSPORT,
+        "input_tokens": input_tokens if type(input_tokens) is int and input_tokens >= 0 else None,
+        "output_tokens": output_tokens if type(output_tokens) is int and output_tokens >= 0 else None,
+    }
 
 
 def _map_exception(exc: Exception) -> ProviderError:

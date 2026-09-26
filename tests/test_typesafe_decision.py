@@ -170,10 +170,20 @@ async def test_malformed_score_legend_fails_closed():
         **response.answers,
         "strength": response.answers["strength"].model_copy(update={"legend": {0: "wrong"}}),
     }})
+    bad.__dict__["_request_id"] = "req-malformed-score"
     provider = TypeSafeDecisionProvider(client=FakeSDKClient(bad))
     with pytest.raises(GenerationEngineError) as exc:
         await GenerationClient(decision_providers={"typesafe": provider}).decide(request())
     assert exc.value.failure.code is FailureCode.MALFORMED_PROVIDER_RESPONSE
+    observation = exc.value.observation
+    assert observation.provider_request_id == "req-malformed-score"
+    assert observation.response_model == "typesafe-ai/jev"
+    assert observation.provider_transport == TRANSPORT
+    assert observation.input_tokens == 14
+    assert observation.output_tokens == 0
+    assert observation.provider_attempt_count == 1
+    assert "wrong" not in exc.value.failure.message
+    assert "wrong" not in observation.model_dump_json()
 
 
 @pytest.mark.asyncio
