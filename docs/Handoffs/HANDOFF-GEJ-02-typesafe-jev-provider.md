@@ -1,6 +1,6 @@
 # HANDOFF — GEJ-02 TypeSafe/Jev decision provider
 
-**Status:** ACTIVE — implementation lease, pending acceptance
+**Status:** READY FOR REVIEW — acceptance witnessed; do not merge before review
 **Repository:** `Drakosfire/GenerationEngine`
 **Physical base:** `gej/01-generic-decision-capability`
 **Cross-repo authority:** `Drakosfire/DungeonOverMind/Docs/Plans/STACK-rules-ingestion-generationengine-sidequest.md`
@@ -158,3 +158,14 @@ Stop instead of widening if:
 - retries cannot be made observable/bounded;
 - Gateway routing requires product code or browser credentials;
 - accurate model/transport truth cannot be represented by the GEJ-01 observation contract.
+
+## Implementation and acceptance evidence (2026-09-26)
+
+- Exact intended PR base: GEJ-01 `ac476569d296ed34850f66491f62ce2da3aa45f5`; tested implementation head: `fa6688133018373a8b6ca6ecb608935e0538d644`. This handoff-only evidence update follows as a separate commit.
+- The official async SDK handles the three public question families through provider-local mapping. Its internal retries are disabled. GE owns the optional SDK dependency, project credential, Gateway route, failure mapping, deadline, retries, and observation fields. No provider vocabulary entered the generic public decision contract.
+- Focused tests: 14 passed. Full Python 3.11 and 3.13 CI test matrices: 182 passed each, with `uv lock --check`, Ruff, and `uv build` passing. The isolated provider-free wheel import test passed within the full suite; CI now installs the optional SDK extra for provider tests while still checking the base wheel separately.
+- Opt-in live Gateway smoke passed with Binary, Choice, and Score answers, `provider=typesafe`, `provider_transport=vercel_ai_gateway`, requested/resolved/response model each `typesafe-ai/jev`, and provider-reported usage of 351 input / 65 output tokens. The response did not identify a concrete upstream model version. No credential was emitted.
+- Lease adjustments identified at activation: `uv.lock`, `scripts/smoke_typesafe_decision.py`, the CI extra, and the optional-dependency invariant test. The cumulative diff was reviewed against the exact GEJ-01 base and `git diff --check` passed.
+- Limitation: the current TypeSafe API accepts text, object, or array state. This adapter rejects other JSON scalar states as `INVALID_REQUEST`; the provider-neutral GE decision contract remains broader.
+
+Acceptance token satisfied: `GEJ_02_TYPESAFE_JEV_PROVIDER_ACCEPTED`.
