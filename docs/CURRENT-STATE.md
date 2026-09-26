@@ -85,6 +85,12 @@ caller JSON Schema
 
 Provider-native strict-schema support is an optimization, not the semantic contract.
 
+OpenAI Responses `status == "incomplete"` on non-streaming generation is a
+terminal `PROVIDER_INCOMPLETE` failure before parse or repair. Refusal retains
+precedence. Safe provider IDs and reported usage, including reasoning tokens,
+remain in the failure observation; partial response text does not. Streaming
+semantics are unchanged.
+
 Products retain domain/business/evidence validation.
 
 ## Streaming

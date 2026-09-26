@@ -25,6 +25,7 @@ from generationengine import (
     TextRequest,
     TextStreamEvent,
 )
+from generationengine.client import _map_provider_exception
 from generationengine.observation import InferenceObservation
 from generationengine.providers.errors import ProviderError
 from generationengine.resolver import resolve
@@ -534,6 +535,53 @@ async def test_default_retry_terminal_failure_reports_all_provider_attempts() ->
     assert provider.calls == 3
     assert exc.value.observation.retry_count == 2
     assert exc.value.observation.provider_attempt_count == 3
+
+
+@pytest.mark.asyncio
+async def test_incomplete_text_failure_is_nonretryable_and_preserves_observation() -> None:
+    provider = FakeTextProvider(
+        errors=[ProviderError.from_code(
+            FailureCode.PROVIDER_INCOMPLETE,
+            "SECRET partial output",
+            provider_request_id="req-incomplete",
+            provider_response_id="resp-incomplete",
+            response_model="gpt-5.1",
+            input_tokens=8,
+            cached_input_tokens=0,
+            output_tokens=2,
+            reasoning_tokens=1,
+        )]
+    )
+    with pytest.raises(GenerationEngineError) as exc:
+        await GenerationClient(text_provider=provider).generate_text(
+            TextRequest(
+                user_prompt="hi",
+                profile=InferenceProfile.TEXT_FAST,
+                max_transport_retries=3,
+            )
+        )
+    assert provider.calls == 1
+    assert exc.value.failure.code is FailureCode.PROVIDER_INCOMPLETE
+    assert exc.value.failure.message == "Provider returned an incomplete response."
+    assert exc.value.observation.state is ObservationState.INCOMPLETE
+    assert exc.value.observation.provider_attempt_count == 1
+    assert exc.value.observation.transport_retry_count == 0
+    assert exc.value.observation.conformance_retry_count == 0
+    assert exc.value.observation.provider_request_id == "req-incomplete"
+    assert exc.value.observation.provider_response_id == "resp-incomplete"
+    assert exc.value.observation.response_model == "gpt-5.1"
+    assert (exc.value.observation.input_tokens, exc.value.observation.cached_input_tokens, exc.value.observation.output_tokens, exc.value.observation.reasoning_tokens) == (8, 0, 2, 1)
+    assert "SECRET" not in str(exc.value.observation.model_dump())
+
+
+def test_provider_error_rebuild_preserves_reasoning_usage() -> None:
+    original = ProviderError.from_code(
+        FailureCode.PROVIDER_INCOMPLETE,
+        reasoning_tokens=0,
+    )
+    rebuilt = _map_provider_exception(original)
+    assert rebuilt.reasoning_tokens == 0
+    assert rebuilt.failure.code is FailureCode.PROVIDER_INCOMPLETE
 
 
 @pytest.mark.asyncio

@@ -16,6 +16,7 @@ class FailureCode(str, Enum):
     UNSUPPORTED_CAPABILITY = "UNSUPPORTED_CAPABILITY"
     INVALID_REQUEST = "INVALID_REQUEST"
     PROVIDER_REFUSED = "PROVIDER_REFUSED"
+    PROVIDER_INCOMPLETE = "PROVIDER_INCOMPLETE"
     RATE_LIMITED = "RATE_LIMITED"
     PROVIDER_TIMEOUT = "PROVIDER_TIMEOUT"
     PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
@@ -35,6 +36,7 @@ class Retryability(str, Enum):
 # Provider-transport codes must not carry SDK/HTTP/exception text. Raw detail
 # may remain on the exception chain or other internal diagnostics.
 PROVIDER_SAFE_MESSAGES: dict[FailureCode, str] = {
+    FailureCode.PROVIDER_INCOMPLETE: "Provider returned an incomplete response.",
     FailureCode.RATE_LIMITED: "Provider rate limit exceeded.",
     FailureCode.PROVIDER_TIMEOUT: "Provider request timed out.",
     FailureCode.PROVIDER_UNAVAILABLE: "Provider is unavailable.",
@@ -47,6 +49,7 @@ FAILURE_RETRYABILITY: dict[FailureCode, Retryability] = {
     FailureCode.UNSUPPORTED_CAPABILITY: Retryability.NO,
     FailureCode.INVALID_REQUEST: Retryability.NO,
     FailureCode.PROVIDER_REFUSED: Retryability.NO,
+    FailureCode.PROVIDER_INCOMPLETE: Retryability.NO,
     FailureCode.RATE_LIMITED: Retryability.YES,
     FailureCode.PROVIDER_TIMEOUT: Retryability.YES,
     FailureCode.PROVIDER_UNAVAILABLE: Retryability.YES,

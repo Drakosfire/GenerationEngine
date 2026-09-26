@@ -48,6 +48,19 @@ class OpenAITextProvider:
             response = await self._client.responses.create(**kwargs)
         except Exception as exc:
             raise self._map_exception(exc) from exc
+        if (
+            getattr(response, "status", None) == "incomplete"
+            and not getattr(response, "refusal", None)
+        ):
+            request_id, response_id = _ids_from_response(response)
+            usage = _usage_from_response(response)
+            raise ProviderError.from_code(
+                FailureCode.PROVIDER_INCOMPLETE,
+                provider_request_id=request_id,
+                provider_response_id=response_id,
+                response_model=getattr(response, "model", None),
+                **usage,
+            )
         return self._result_from_response(response)
 
     async def stream(self, call: TextGenerationCall) -> AsyncIterator[TextStreamEvent]:
@@ -146,27 +159,14 @@ class OpenAITextProvider:
                 provider_response_id=response_id,
                 response_model=getattr(response, "model", None),
             )
-        text = getattr(response, "output_text", None)
-        usage = getattr(response, "usage", None)
-        cached = None
-        reasoning_tokens = None
-        if usage is not None:
-            input_details = getattr(usage, "input_tokens_details", None)
-            if input_details is not None:
-                cached = getattr(input_details, "cached_tokens", None)
-            output_details = getattr(usage, "output_tokens_details", None)
-            if output_details is not None:
-                reasoning_tokens = getattr(output_details, "reasoning_tokens", None)
+        usage = _usage_from_response(response)
         return TextGenerationResult(
-            text=text,
+            text=getattr(response, "output_text", None),
             parsed=None,
             provider_request_id=request_id,
             provider_response_id=response_id,
             response_model=getattr(response, "model", None),
-            input_tokens=getattr(usage, "input_tokens", None) if usage else None,
-            cached_input_tokens=cached,
-            output_tokens=getattr(usage, "output_tokens", None) if usage else None,
-            reasoning_tokens=reasoning_tokens,
+            **usage,
         )
 
     def _map_exception(self, exc: Exception) -> ProviderError:
@@ -203,3 +203,15 @@ def _completed_observation(result: TextGenerationResult) -> InferenceObservation
 
 def _ids_from_response(response: Any) -> tuple[str | None, str | None]:
     return getattr(response, "_request_id", None), getattr(response, "id", None)
+
+
+def _usage_from_response(response: Any) -> dict[str, int | None]:
+    usage = getattr(response, "usage", None)
+    input_details = getattr(usage, "input_tokens_details", None)
+    output_details = getattr(usage, "output_tokens_details", None)
+    return {
+        "input_tokens": getattr(usage, "input_tokens", None),
+        "cached_input_tokens": getattr(input_details, "cached_tokens", None),
+        "output_tokens": getattr(usage, "output_tokens", None),
+        "reasoning_tokens": getattr(output_details, "reasoning_tokens", None),
+    }
