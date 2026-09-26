@@ -231,6 +231,17 @@ class GenerationClient:
                 started=started,
             )
             return
+        if request.max_transport_retries is not None and request.max_transport_retries > 0:
+            yield _stream_failure(
+                failure=InferenceFailure.from_code(
+                    FailureCode.INVALID_REQUEST,
+                    "stream_text does not support transport retries.",
+                ),
+                request=request,
+                started=started,
+                provider_attempt_count=0,
+            )
+            return
         deadline_s = _deadline_s(request.deadline_ms)
         resolution = None
         try:
@@ -372,6 +383,7 @@ class GenerationClient:
                 started=started,
                 deadline_s=deadline_s,
                 attempt=lambda: provider.generate(call),
+                max_transport_retries=request.max_transport_retries,
             )
         except ProviderError as exc:
             raise GenerationEngineError(
@@ -457,6 +469,7 @@ class GenerationClient:
                     deadline_s=deadline_s,
                     attempt=lambda current=call: provider.generate(current),
                     attempt_usage=usage_results,
+                    max_transport_retries=request.max_transport_retries,
                 )
             except ProviderError as exc:
                 failed_retries = _retry_count_from_error(exc)
@@ -553,6 +566,7 @@ class GenerationClient:
                 input_tokens=usage["input_tokens"],
                 cached_input_tokens=usage["cached_input_tokens"],
                 output_tokens=usage["output_tokens"],
+                reasoning_tokens=usage["reasoning_tokens"],
                 cost_usd=None,
                 latency_ms=_elapsed_ms(started),
                 retry_count=transport_retries,
@@ -651,6 +665,8 @@ def _text_call(
         user_prompt=request.user_prompt if user_prompt is None else user_prompt,
         system_prompt=request.system_prompt,
         temperature=request.temperature,
+        reasoning_effort=request.reasoning_effort,
+        max_transport_retries=request.max_transport_retries,
         max_output_tokens=request.max_output_tokens,
         json_object=request.json_object,
         json_schema=request.json_schema,
@@ -664,6 +680,7 @@ async def _execute_with_retries(
     deadline_s: float,
     attempt: Callable[[], Awaitable[T]],
     attempt_usage: list | None = None,
+    max_transport_retries: int | None = None,
 ) -> tuple[T, int]:
     """Run one provider operation under a single overall deadline.
 
@@ -682,7 +699,8 @@ async def _execute_with_retries(
 
     last_error: ProviderError | None = None
     retry_count = 0
-    for attempt_index in range(MAX_ATTEMPTS):
+    max_attempts = MAX_ATTEMPTS if max_transport_retries is None else 1 + max_transport_retries
+    for attempt_index in range(max_attempts):
         remaining = _remaining_s(started, deadline_s)
         if remaining <= 0:
             last_error = _timeout_error(deadline_s, retry_count=retry_count)
@@ -698,7 +716,7 @@ async def _execute_with_retries(
         except TimeoutError:
             last_error = _timeout_error(deadline_s, retry_count=retry_count)
             _record(last_error)
-        if not last_error.retryable or attempt_index == MAX_ATTEMPTS - 1:
+        if not last_error.retryable or attempt_index == max_attempts - 1:
             raise last_error
         delay = BACKOFF_SECONDS[min(attempt_index, len(BACKOFF_SECONDS) - 1)]
         remaining_after = _remaining_s(started, deadline_s)
@@ -770,6 +788,7 @@ def _aggregate_usage(results: list) -> dict[str, int | None]:
         "input_tokens": _field("input_tokens"),
         "cached_input_tokens": _field("cached_input_tokens"),
         "output_tokens": _field("output_tokens"),
+        "reasoning_tokens": _field("reasoning_tokens"),
     }
 
 
@@ -885,6 +904,7 @@ def _public_stream_terminal(
             input_tokens=provider_obs.input_tokens,
             cached_input_tokens=provider_obs.cached_input_tokens,
             output_tokens=provider_obs.output_tokens,
+            reasoning_tokens=provider_obs.reasoning_tokens,
         ),
     )
 
@@ -907,6 +927,7 @@ def _completed_observation_from_stream(
         input_tokens=provider_obs.input_tokens,
         cached_input_tokens=provider_obs.cached_input_tokens,
         output_tokens=provider_obs.output_tokens,
+        reasoning_tokens=provider_obs.reasoning_tokens,
         cost_usd=None,
         latency_ms=latency_ms,
         retry_count=0,
@@ -939,6 +960,7 @@ def _completed_observation(
         input_tokens=result.input_tokens,
         cached_input_tokens=result.cached_input_tokens,
         output_tokens=result.output_tokens,
+        reasoning_tokens=result.reasoning_tokens,
         cost_usd=None,
         latency_ms=latency_ms,
         retry_count=retry_count,
@@ -966,6 +988,7 @@ def _failed_observation(
     input_tokens: int | None = None,
     cached_input_tokens: int | None = None,
     output_tokens: int | None = None,
+    reasoning_tokens: int | None = None,
     conformance_retry_count: int = 0,
     provider_attempt_count: int | None = None,
     usage: dict[str, int | None] | None = None,
@@ -1015,6 +1038,11 @@ def _failed_observation(
             usage["output_tokens"]
             if usage is not None
             else (output_tokens if output_tokens is not None else (result.output_tokens if result else None))
+        ),
+        reasoning_tokens=(
+            usage["reasoning_tokens"]
+            if usage is not None
+            else (reasoning_tokens if reasoning_tokens is not None else (getattr(result, "reasoning_tokens", None) if result else None))
         ),
         latency_ms=latency_ms,
         retry_count=retry_count,
