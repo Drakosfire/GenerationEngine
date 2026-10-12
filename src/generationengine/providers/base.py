@@ -13,7 +13,7 @@ from typing_extensions import runtime_checkable
 
 from generationengine.failures import InferenceFailure
 from generationengine.observation import InferenceObservation
-from generationengine.types import DecisionAnswer, DecisionQuestion
+from generationengine.types import DecisionAnswer, DecisionQuestion, ProviderRoute
 
 
 class TextGenerationCall(BaseModel):
@@ -24,6 +24,7 @@ class TextGenerationCall(BaseModel):
     system_prompt: str | None = None
     temperature: float | None = 0.7
     reasoning_effort: str | None = Field(default=None, min_length=1)
+    provider_route: ProviderRoute | None = None
     max_transport_retries: int | None = Field(default=None, ge=0)
     max_output_tokens: int | None = Field(default=None, ge=1)
     json_object: bool = False

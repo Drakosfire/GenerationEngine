@@ -15,6 +15,7 @@ from generationengine import (
     TextRequest,
 )
 from generationengine.providers.errors import ProviderError
+from generationengine.types import ProviderRoute
 
 FIXTURE_SCHEMA = {
     "type": "object",
@@ -231,6 +232,33 @@ async def test_repair_inherits_reasoning_and_retry_ceiling_with_truthful_usage()
     assert result.observation.reasoning_tokens is None  # retry failure supplied no usage
     assert [call.reasoning_effort for call in provider.calls] == ["high"] * 3
     assert [call.max_transport_retries for call in provider.calls] == [1] * 3
+
+
+@pytest.mark.asyncio
+async def test_repair_and_transport_retry_keep_explicit_provider_route() -> None:
+    route = ProviderRoute(order=("First", "Second"), allow_fallbacks=False)
+    provider = ScriptedText(
+        [
+            _result(text="not-json", parsed=None),
+            ProviderError.from_code(FailureCode.RATE_LIMITED),
+            _result(),
+        ]
+    )
+    result = await GenerationClient(text_providers={"openrouter": provider}).generate_structured(
+        _request(
+            profile=None,
+            provider="openrouter",
+            model="sample/model",
+            provider_route=route,
+            max_transport_retries=1,
+            deadline_ms=10_000,
+        )
+    )
+    assert result.parsed == {"name": "ok", "count": 1}
+    assert [call.provider_route for call in provider.calls] == [route, route, route]
+    assert result.observation.provider_attempt_count == 3
+    assert result.observation.conformance_retry_count == 1
+    assert result.observation.transport_retry_count == 1
 
 
 @pytest.mark.asyncio

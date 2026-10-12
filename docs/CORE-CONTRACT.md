@@ -119,8 +119,9 @@ remains observation truth.
 controls. An explicit effort label is forwarded unchanged for ordinary,
 structured, repair, and streaming text. OpenAI Responses receives
 `reasoning={"effort": label}`; OpenRouter Chat receives the same reasoning
-object through adapter-local `extra_body`. Model-specific support is decided
-by the provider.
+object through adapter-local `extra_body`. For OpenRouter, explicit `"none"`
+also sends `"enabled": false`. Model-specific support is decided by the
+provider.
 
 `TextRequest.max_transport_retries` and `TextGenerationCall.max_transport_retries`
 are nonnegative `int | None` fields. `None` preserves the existing ceiling of
@@ -133,6 +134,24 @@ retries remain disabled.
 Streaming remains no-retry. `None` and `0` preserve streaming behavior. A
 positive retry ceiling yields one `INVALID_REQUEST` terminal before provider
 construction, with zero provider attempts.
+
+### Explicit provider route
+
+`TextRequest.provider_route` and `TextGenerationCall.provider_route` are
+optional typed `ProviderRoute` values. A route has a nonempty ordered tuple of
+distinct, nonblank upstream provider names and an explicit boolean
+`allow_fallbacks`. Names with outer whitespace, duplicate names ignoring case,
+and unknown route fields are invalid. An absent route leaves provider routing
+unspecified and preserves existing request behavior.
+
+OpenRouter Chat maps the route to its provider-selection object inside
+adapter-local `extra_body`. It composes with reasoning controls, including
+`reasoning_effort="none"`. A route whose selected GE text provider is not
+OpenRouter fails as `INVALID_REQUEST` before provider construction or execution,
+with zero provider attempts; streaming emits one matching failure terminal.
+The route applies unchanged to ordinary, JSON-object, structured, repair,
+transport-retry, and streaming calls. It does not select a GE model, add a
+catalog record, or expose arbitrary provider request fields.
 
 ### Schema-less JSON-object mode
 

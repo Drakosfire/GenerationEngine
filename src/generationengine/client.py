@@ -406,6 +406,17 @@ class GenerationClient:
             )
             return
 
+        route_failure = _text_route_failure(request, resolution.provider)
+        if route_failure is not None:
+            yield _stream_failure(
+                failure=route_failure,
+                request=request,
+                resolution=resolution,
+                started=started,
+                provider_attempt_count=0,
+            )
+            return
+
         stream = None
         terminal = False
         try:
@@ -523,6 +534,14 @@ class GenerationClient:
             )
         except ResolutionError as exc:
             raise _config_error(exc.failure, request=request) from exc
+        route_failure = _text_route_failure(request, resolution.provider)
+        if route_failure is not None:
+            raise _config_error(
+                route_failure,
+                provider=resolution.provider,
+                request=request,
+                provider_attempt_count=0,
+            )
         provider = self._text_provider_for(resolution.provider)
         call = _text_call(request, resolution.provider_model_id)
         provider_attempt_count = 0
@@ -593,6 +612,14 @@ class GenerationClient:
             )
         except ResolutionError as exc:
             raise _config_error(exc.failure, request=request) from exc
+        route_failure = _text_route_failure(request, resolution.provider)
+        if route_failure is not None:
+            raise _config_error(
+                route_failure,
+                provider=resolution.provider,
+                request=request,
+                provider_attempt_count=0,
+            )
         provider = self._text_provider_for(resolution.provider)
         schema = request.json_schema
         assert schema is not None
@@ -821,12 +848,22 @@ def _text_call(
         system_prompt=request.system_prompt,
         temperature=request.temperature,
         reasoning_effort=request.reasoning_effort,
+        provider_route=request.provider_route,
         max_transport_retries=request.max_transport_retries,
         max_output_tokens=request.max_output_tokens,
         json_object=request.json_object,
         json_schema=request.json_schema,
         schema_name=request.schema_name,
     )
+
+
+def _text_route_failure(request: TextRequest, provider: str) -> InferenceFailure | None:
+    if request.provider_route is not None and provider != "openrouter":
+        return InferenceFailure.from_code(
+            FailureCode.INVALID_REQUEST,
+            "Provider routing is unavailable for the selected text provider.",
+        )
+    return None
 
 
 def _validate_decision_answers(request: DecisionRequest, result: DecisionGenerationResult) -> None:

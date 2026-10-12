@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, FiniteFloat, model_validator
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 from generationengine.catalog import InferenceProfile
 from generationengine.failures import InferenceFailure
@@ -21,6 +21,23 @@ class GenerationEngineError(Exception):
         self.observation = observation
 
 
+class ProviderRoute(BaseModel):
+    """An explicit, ordered upstream provider route for text execution."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    order: tuple[str, ...] = Field(min_length=1)
+    allow_fallbacks: bool = Field(strict=True)
+
+    @model_validator(mode="after")
+    def validate_order(self) -> ProviderRoute:
+        if any(not name.strip() or name != name.strip() for name in self.order):
+            raise ValueError("Provider route names must be nonblank and have no outer whitespace")
+        if len({name.casefold() for name in self.order}) != len(self.order):
+            raise ValueError("Provider route names must be distinct")
+        return self
+
+
 class TextRequest(BaseModel):
     user_prompt: str
     system_prompt: str | None = None
@@ -29,6 +46,7 @@ class TextRequest(BaseModel):
     model: str | None = None
     temperature: float | None = 0.7
     reasoning_effort: str | None = Field(default=None, min_length=1)
+    provider_route: ProviderRoute | None = None
     max_transport_retries: int | None = Field(default=None, ge=0)
     max_output_tokens: int | None = Field(
         default=None,

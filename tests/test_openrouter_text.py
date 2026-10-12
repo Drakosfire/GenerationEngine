@@ -15,6 +15,7 @@ from generationengine.providers.openrouter_text import (
     OpenRouterTextProvider,
     _ids_from_response,
 )
+from generationengine.types import ProviderRoute
 
 
 @pytest.mark.asyncio
@@ -179,6 +180,11 @@ def test_openrouter_reasoning_wire_and_usage_truth() -> None:
         )
         assert kwargs["extra_body"] == {"reasoning": {"effort": "medium"}}
 
+    disabled = provider._request_kwargs(
+        call.model_copy(update={"reasoning_effort": "none"})
+    )
+    assert disabled["extra_body"] == {"reasoning": {"effort": "none", "enabled": False}}
+
     response = _chat_response()
     response.usage.completion_tokens_details = SimpleNamespace(reasoning_tokens=0)
     assert provider._result_from_response(response).reasoning_tokens == 0
@@ -240,6 +246,72 @@ def test_openrouter_json_object_maps_to_response_format_and_composes_controls() 
     assert kwargs["response_format"] == {"type": "json_object"}
     assert kwargs["temperature"] == 0.2
     assert kwargs["max_completion_tokens"] == 400
+
+
+@pytest.mark.asyncio
+async def test_openrouter_provider_route_json_object_exact_sdk_wire() -> None:
+    from generationengine import GenerationClient, TextRequest
+
+    completions = _FakeCompletions(response=_chat_response(text='{"ok":true}'))
+    client = GenerationClient(
+        text_providers={"openrouter": _provider_with_completions(completions)}
+    )
+    result = await client.generate_text(
+        TextRequest(
+            user_prompt="input",
+            system_prompt="instructions",
+            provider="openrouter",
+            model="sample/model",
+            temperature=None,
+            json_object=True,
+            reasoning_effort="none",
+            provider_route=ProviderRoute(order=("DeepSeek",), allow_fallbacks=False),
+            max_transport_retries=0,
+        )
+    )
+    assert completions.calls == [
+        {
+            "model": "sample/model",
+            "messages": [
+                {"role": "system", "content": "instructions"},
+                {"role": "user", "content": "input"},
+            ],
+            "extra_body": {
+                "provider": {"order": ["DeepSeek"], "allow_fallbacks": False},
+                "reasoning": {"effort": "none", "enabled": False},
+            },
+            "response_format": {"type": "json_object"},
+        }
+    ]
+    assert result.text == '{"ok":true}'
+    assert result.parsed is None
+    assert result.observation.provider == "openrouter"
+    assert result.observation.provider_attempt_count == 1
+
+
+def test_openrouter_route_omission_preserves_existing_wire() -> None:
+    provider = OpenRouterTextProvider(client=SimpleNamespace())
+    call = TextGenerationCall(model="sample/model", user_prompt="hi", temperature=None)
+    assert provider._request_kwargs(call) == {
+        "model": "sample/model",
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+
+
+def test_openrouter_stream_keeps_provider_route() -> None:
+    provider = OpenRouterTextProvider(client=SimpleNamespace())
+    kwargs = provider._request_kwargs(
+        TextGenerationCall(
+            model="sample/model",
+            user_prompt="hi",
+            provider_route=ProviderRoute(order=("First", "Second"), allow_fallbacks=True),
+        ),
+        streaming=True,
+    )
+    assert kwargs["stream"] is True
+    assert kwargs["extra_body"] == {
+        "provider": {"order": ["First", "Second"], "allow_fallbacks": True}
+    }
 
 
 @pytest.mark.asyncio
