@@ -55,8 +55,15 @@ Provider adapters translate the generic ceiling into provider-native wire vocabu
 
 `TextRequest.reasoning_effort=None` omits provider reasoning controls; an
 explicit label reaches OpenAI Responses or OpenRouter Chat unchanged, including
-structured repair and streaming. `max_transport_retries=None` preserves two
-transport retries after the first attempt. Explicit nonnegative values set the
+structured repair and streaming. On OpenRouter, `"none"` also emits
+`reasoning.enabled=false`. An optional typed `provider_route` constrains
+OpenRouter's upstream provider order and fallback behavior; it composes with
+reasoning controls and survives structured repair and transport retries. A
+route for another selected GE text provider fails before its adapter is
+constructed. Omitting the route keeps the existing provider request shape.
+
+`max_transport_retries=None` preserves two transport retries after the first
+attempt. Explicit nonnegative values set the
 ceiling per non-streaming provider execution within the overall deadline.
 Streaming accepts `None` or `0`; a positive value fails before provider work.
 

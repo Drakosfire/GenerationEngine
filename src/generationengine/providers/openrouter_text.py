@@ -125,8 +125,19 @@ class OpenRouterTextProvider:
             kwargs["temperature"] = call.temperature
         if call.max_output_tokens is not None:
             kwargs["max_completion_tokens"] = call.max_output_tokens
+        extra_body: dict[str, Any] = {}
+        if call.provider_route is not None:
+            extra_body["provider"] = {
+                "order": list(call.provider_route.order),
+                "allow_fallbacks": call.provider_route.allow_fallbacks,
+            }
         if call.reasoning_effort is not None:
-            kwargs["extra_body"] = {"reasoning": {"effort": call.reasoning_effort}}
+            reasoning: dict[str, Any] = {"effort": call.reasoning_effort}
+            if call.reasoning_effort == "none":
+                reasoning["enabled"] = False
+            extra_body["reasoning"] = reasoning
+        if extra_body:
+            kwargs["extra_body"] = extra_body
         if call.json_object:
             kwargs["response_format"] = {"type": "json_object"}
         if streaming:

@@ -29,6 +29,7 @@ from generationengine.client import _map_provider_exception
 from generationengine.observation import InferenceObservation
 from generationengine.providers.errors import ProviderError
 from generationengine.resolver import resolve
+from generationengine.types import ProviderRoute
 
 
 class FakeTextProvider:
@@ -96,6 +97,78 @@ class CloseableProvider(FakeTextProvider):
         self.close_calls += 1
         if self.close_error is not None:
             raise self.close_error
+
+
+@pytest.mark.parametrize(
+    "route",
+    [
+        {"order": (), "allow_fallbacks": False},
+        {"order": ("",), "allow_fallbacks": False},
+        {"order": (" DeepSeek",), "allow_fallbacks": False},
+        {"order": ("DeepSeek", "deepseek"), "allow_fallbacks": False},
+        {"order": ("DeepSeek",), "allow_fallbacks": "false"},
+        {"order": ("DeepSeek",), "allow_fallbacks": False, "extra_body": {}},
+    ],
+)
+def test_provider_route_rejects_invalid_or_untyped_values(route: dict) -> None:
+    with pytest.raises(ValidationError):
+        ProviderRoute(**route)
+    with pytest.raises(ValidationError):
+        TextRequest(user_prompt="hi", provider_route=route)
+    with pytest.raises(ValidationError):
+        TextGenerationCall(model="sample/model", user_prompt="hi", provider_route=route)
+
+
+@pytest.mark.asyncio
+async def test_provider_route_rejected_before_unsupported_provider_construction() -> None:
+    route = ProviderRoute(order=("DeepSeek",), allow_fallbacks=False)
+    request = TextRequest(
+        user_prompt="hi", provider="openai", model="gpt-5.1", provider_route=route
+    )
+    client = GenerationClient.from_env()
+    with pytest.raises(GenerationEngineError) as text_exc:
+        await client.generate_text(request)
+    assert text_exc.value.failure.code is FailureCode.INVALID_REQUEST
+    assert text_exc.value.observation.provider_attempt_count == 0
+    with pytest.raises(GenerationEngineError) as structured_exc:
+        await client.generate_structured(
+            request.model_copy(update={"json_schema": {"type": "object"}})
+        )
+    assert structured_exc.value.failure.code is FailureCode.INVALID_REQUEST
+    assert structured_exc.value.observation.provider_attempt_count == 0
+    events = [event async for event in client.stream_text(request)]
+    assert len(events) == 1
+    assert isinstance(events[0], TextFailed)
+    assert events[0].failure.code is FailureCode.INVALID_REQUEST
+    assert events[0].observation.provider_attempt_count == 0
+    assert client._text_providers == {}
+
+
+@pytest.mark.asyncio
+async def test_provider_route_survives_transport_retry_with_truthful_attempts() -> None:
+    route = ProviderRoute(order=("DeepSeek",), allow_fallbacks=False)
+    request = TextRequest(
+        user_prompt="hi",
+        provider="openrouter",
+        model="sample/model",
+        provider_route=route,
+        max_transport_retries=1,
+        deadline_ms=10_000,
+    )
+    provider = FakeTextProvider(errors=[ProviderError.from_code(FailureCode.RATE_LIMITED)])
+    result = await GenerationClient(text_providers={"openrouter": provider}).generate_text(request)
+    assert [call.provider_route for call in provider.seen_calls] == [route, route]
+    assert result.observation.provider_attempt_count == 2
+    assert result.observation.transport_retry_count == 1
+
+    terminal = FakeTextProvider(
+        errors=[ProviderError.from_code(FailureCode.RATE_LIMITED) for _ in range(2)]
+    )
+    with pytest.raises(GenerationEngineError) as exc:
+        await GenerationClient(text_providers={"openrouter": terminal}).generate_text(request)
+    assert [call.provider_route for call in terminal.seen_calls] == [route, route]
+    assert exc.value.observation.provider_attempt_count == 2
+    assert exc.value.observation.transport_retry_count == 1
 
 
 def test_aclose_is_async() -> None:
