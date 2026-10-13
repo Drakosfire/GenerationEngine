@@ -131,6 +131,8 @@ class OpenRouterTextProvider:
                 "order": list(call.provider_route.order),
                 "allow_fallbacks": call.provider_route.allow_fallbacks,
             }
+            if call.provider_route.require_parameters:
+                extra_body["provider"]["require_parameters"] = True
         if call.reasoning_effort is not None:
             reasoning: dict[str, Any] = {"effort": call.reasoning_effort}
             if call.reasoning_effort == "none":

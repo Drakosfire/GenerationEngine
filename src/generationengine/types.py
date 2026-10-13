@@ -28,6 +28,11 @@ class ProviderRoute(BaseModel):
 
     order: tuple[str, ...] = Field(min_length=1)
     allow_fallbacks: bool = Field(strict=True)
+    require_parameters: bool = Field(
+        default=False,
+        strict=True,
+        description="Require the upstream route to support every requested parameter.",
+    )
 
     @model_validator(mode="after")
     def validate_order(self) -> ProviderRoute:
