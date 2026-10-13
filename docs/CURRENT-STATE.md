@@ -58,8 +58,11 @@ explicit label reaches OpenAI Responses or OpenRouter Chat unchanged, including
 structured repair and streaming. On OpenRouter, `"none"` also emits
 `reasoning.enabled=false`. An optional typed `provider_route` constrains
 OpenRouter's upstream provider order and fallback behavior; it composes with
-reasoning controls and survives structured repair and transport retries. A
-route for another selected GE text provider fails before its adapter is
+reasoning controls and survives structured repair and transport retries. Its
+strict `require_parameters` option defaults false; true asks OpenRouter to
+filter endpoints lacking any requested parameter, and is sent only when true.
+This filters route eligibility but does not guarantee valid generated output.
+A route for another selected GE text provider fails before its adapter is
 constructed. Omitting the route keeps the existing provider request shape.
 
 `max_transport_retries=None` preserves two transport retries after the first

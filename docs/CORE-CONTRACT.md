@@ -140,15 +140,21 @@ construction, with zero provider attempts.
 `TextRequest.provider_route` and `TextGenerationCall.provider_route` are
 optional typed `ProviderRoute` values. A route has a nonempty ordered tuple of
 distinct, nonblank upstream provider names and an explicit boolean
-`allow_fallbacks`. Names with outer whitespace, duplicate names ignoring case,
-and unknown route fields are invalid. An absent route leaves provider routing
+`allow_fallbacks`, plus a strict `require_parameters` boolean defaulting to
+`False`. Names with outer whitespace, duplicate names ignoring case, and
+unknown route fields are invalid. An absent route leaves provider routing
 unspecified and preserves existing request behavior.
 
 OpenRouter Chat maps the route to its provider-selection object inside
 adapter-local `extra_body`. It composes with reasoning controls, including
-`reasoning_effort="none"`. A route whose selected GE text provider is not
-OpenRouter fails as `INVALID_REQUEST` before provider construction or execution,
-with zero provider attempts; streaming emits one matching failure terminal.
+`reasoning_effort="none"`. When `require_parameters=True`, OpenRouter receives
+that option and filters route endpoints that do not support every requested
+parameter. The default false value is omitted from the wire and preserves
+existing request shapes. This constrains endpoint selection; it does not
+guarantee generated content or prove that any endpoint supports the request. A
+route whose selected GE text provider is not OpenRouter fails as
+`INVALID_REQUEST` before provider construction or execution, with zero provider
+attempts; streaming emits one matching failure terminal.
 The route applies unchanged to ordinary, JSON-object, structured, repair,
 transport-retry, and streaming calls. It does not select a GE model, add a
 catalog record, or expose arbitrary provider request fields.

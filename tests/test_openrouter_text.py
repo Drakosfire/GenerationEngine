@@ -314,6 +314,66 @@ def test_openrouter_stream_keeps_provider_route() -> None:
     }
 
 
+def test_openrouter_route_requires_parameters_only_when_requested() -> None:
+    provider = OpenRouterTextProvider(client=SimpleNamespace())
+    call = TextGenerationCall(
+        model="sample/model",
+        user_prompt="hi",
+        provider_route=ProviderRoute(
+            order=("DeepSeek",),
+            allow_fallbacks=False,
+            require_parameters=True,
+        ),
+    )
+    assert provider._request_kwargs(call)["extra_body"] == {
+        "provider": {
+            "order": ["DeepSeek"],
+            "allow_fallbacks": False,
+            "require_parameters": True,
+        }
+    }
+
+
+@pytest.mark.parametrize("value", [0, 1, "true", None])
+def test_provider_route_require_parameters_is_strict(value) -> None:
+    with pytest.raises(ValueError):
+        ProviderRoute(
+            order=("DeepSeek",),
+            allow_fallbacks=False,
+            require_parameters=value,
+        )
+
+
+@pytest.mark.asyncio
+async def test_openrouter_client_forwards_required_parameter_to_sdk_kwargs() -> None:
+    from generationengine import GenerationClient, TextRequest
+
+    completions = _FakeCompletions(response=_chat_response(text='{"ok":true}'))
+    client = GenerationClient(
+        text_providers={"openrouter": _provider_with_completions(completions)}
+    )
+    await client.generate_text(
+        TextRequest(
+            user_prompt="input",
+            provider="openrouter",
+            model="sample/model",
+            temperature=None,
+            provider_route=ProviderRoute(
+                order=("DeepSeek",),
+                allow_fallbacks=False,
+                require_parameters=True,
+            ),
+            json_object=True,
+        )
+    )
+    assert completions.calls[0]["extra_body"]["provider"] == {
+        "order": ["DeepSeek"],
+        "allow_fallbacks": False,
+        "require_parameters": True,
+    }
+    assert completions.calls[0]["response_format"] == {"type": "json_object"}
+
+
 @pytest.mark.asyncio
 async def test_openrouter_json_object_success_remains_raw_text() -> None:
     completions = _FakeCompletions(response=_chat_response(text="{not-json"))
