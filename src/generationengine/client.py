@@ -7,6 +7,7 @@ import math
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TypeVar
+from uuid import uuid4
 
 from pydantic import ValidationError
 
@@ -45,6 +46,7 @@ from generationengine.types import (
     ImageResult,
     ScoreDecisionAnswer,
     ScoreDecisionQuestion,
+    StructuredAttemptCompleted,
     TextRequest,
     TextResult,
 )
@@ -219,7 +221,12 @@ class GenerationClient:
             )
         return await self._generate_text(request, capability=Capability.TEXT)
 
-    async def generate_structured(self, request: TextRequest) -> TextResult:
+    async def generate_structured(
+        self,
+        request: TextRequest,
+        *,
+        on_attempt_completed: Callable[[StructuredAttemptCompleted], Awaitable[None]] | None = None,
+    ) -> TextResult:
         self._ensure_open(request=request)
         if request.json_object:
             raise _config_error(
@@ -250,7 +257,7 @@ class GenerationClient:
                 request=request,
                 provider_attempt_count=0,
             ) from exc
-        return await self._generate_structured(request)
+        return await self._generate_structured(request, on_attempt_completed=on_attempt_completed)
 
     async def decide(self, request: DecisionRequest | dict) -> DecisionResult:
         """One provider-neutral typed decision operation under the shared retry/deadline policy."""
@@ -600,7 +607,12 @@ class GenerationClient:
             observation=observation,
         )
 
-    async def _generate_structured(self, request: TextRequest) -> TextResult:
+    async def _generate_structured(
+        self,
+        request: TextRequest,
+        *,
+        on_attempt_completed: Callable[[StructuredAttemptCompleted], Awaitable[None]] | None = None,
+    ) -> TextResult:
         started = time.monotonic()
         deadline_s = _deadline_s(request.deadline_ms)
         try:
@@ -628,6 +640,7 @@ class GenerationClient:
         transport_retries = 0
         conformance_retries = 0
         provider_attempts = 0
+        operation_id = uuid4().hex
         call = _text_call(request, resolution.provider_model_id)
 
         while True:
@@ -655,6 +668,51 @@ class GenerationClient:
                 )
             except ProviderError as exc:
                 failed_retries = _retry_count_from_error(exc)
+                failed_attempts = 1 + failed_retries
+                if (
+                    on_attempt_completed is not None
+                    and exc.failure.code is FailureCode.PROVIDER_INCOMPLETE
+                ):
+                    ordinal = provider_attempts + failed_attempts
+                    event = StructuredAttemptCompleted(
+                        operation_id=operation_id,
+                        event_id=f"{operation_id}:{ordinal}",
+                        ordinal=ordinal,
+                        kind="initial" if conformance_retries == 0 else "conformance",
+                        response_status="incomplete",
+                        provider=resolution.provider,
+                        requested_model=request.model,
+                        resolved_model=resolution.resolved_model,
+                        response_model=exc.response_model,
+                        provider_request_id=exc.provider_request_id,
+                        provider_response_id=exc.provider_response_id,
+                        text=None,
+                        input_tokens=exc.input_tokens,
+                        cached_input_tokens=exc.cached_input_tokens,
+                        output_tokens=exc.output_tokens,
+                        reasoning_tokens=exc.reasoning_tokens,
+                    )
+                    try:
+                        await on_attempt_completed(event)
+                    except Exception:
+                        evidence_failure = InferenceFailure.from_code(
+                            FailureCode.ATTEMPT_EVIDENCE_PERSISTENCE_FAILED,
+                            "Consumer attempt-evidence sink did not accept a returned provider response.",
+                        )
+                        raise GenerationEngineError(
+                            evidence_failure,
+                            _structured_observation(
+                                request=request,
+                                resolution=resolution,
+                                latency_ms=_elapsed_ms(started),
+                                transport_retries=transport_retries + failed_retries,
+                                conformance_retries=conformance_retries,
+                                provider_attempts=provider_attempts + failed_attempts,
+                                usage_results=usage_results,
+                                failure=evidence_failure,
+                                result=exc,
+                            ),
+                        ) from None
                 raise GenerationEngineError(
                     exc.failure,
                     _structured_observation(
@@ -671,6 +729,47 @@ class GenerationClient:
                 ) from exc
             transport_retries += call_retries
             provider_attempts += 1 + call_retries
+            if on_attempt_completed is not None:
+                ordinal = provider_attempts
+                event = StructuredAttemptCompleted(
+                    operation_id=operation_id,
+                    event_id=f"{operation_id}:{ordinal}",
+                    ordinal=ordinal,
+                    kind="initial" if conformance_retries == 0 else "conformance",
+                    response_status="refused" if result.refused else "returned",
+                    provider=resolution.provider,
+                    requested_model=request.model,
+                    resolved_model=resolution.resolved_model,
+                    response_model=result.response_model,
+                    provider_request_id=result.provider_request_id,
+                    provider_response_id=result.provider_response_id,
+                    text=result.text,
+                    input_tokens=result.input_tokens,
+                    cached_input_tokens=result.cached_input_tokens,
+                    output_tokens=result.output_tokens,
+                    reasoning_tokens=result.reasoning_tokens,
+                )
+                try:
+                    await on_attempt_completed(event)
+                except Exception:
+                    failure = InferenceFailure.from_code(
+                        FailureCode.ATTEMPT_EVIDENCE_PERSISTENCE_FAILED,
+                        "Consumer attempt-evidence sink did not accept a returned provider response.",
+                    )
+                    raise GenerationEngineError(
+                        failure,
+                        _structured_observation(
+                            request=request,
+                            resolution=resolution,
+                            latency_ms=_elapsed_ms(started),
+                            transport_retries=transport_retries,
+                            conformance_retries=conformance_retries,
+                            provider_attempts=provider_attempts,
+                            usage_results=usage_results,
+                            failure=failure,
+                            result=result,
+                        ),
+                    ) from None
             if result.refused:
                 failure = InferenceFailure.from_code(
                     FailureCode.PROVIDER_REFUSED,

@@ -98,6 +98,12 @@ caller JSON Schema
 → parsed schema-conforming object OR normalized failure
 ```
 
+Callers may opt into an awaited `on_attempt_completed` evidence callback for
+each returned provider response. The hook runs before refusal handling,
+conformance checks, or a corrective follow-up; it is not called for transport
+attempts that return no provider result. See the active
+[structured attempt evidence handoff](Handoffs/HANDOFF-structured-attempt-completion-evidence.md).
+
 Provider-native strict-schema support is an optimization, not the semantic contract.
 
 OpenAI Responses `status == "incomplete"` on non-streaming generation is a

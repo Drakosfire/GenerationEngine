@@ -33,6 +33,8 @@ Each immutable, provider-neutral event contains:
 - the exact returned text, privately delivered only to the callback;
 - input, cached-input, output, and reasoning usage exactly as observed, retaining
   `None` for unknown values rather than substituting zero.
+- a response status distinguishing ordinary returned, refused, and incomplete
+  provider outcomes.
 
 The callback is opt-in. Event text is not added to `TextResult`, normalized
 observations, logs, exceptions, or default telemetry. The contract carries no
@@ -45,6 +47,11 @@ failure indicating that a provider response was received but its consumer sink
 did not accept the event. GE does not retry the callback and does not replay an
 uncertain provider attempt. The original callback exception is not exposed as
 public error text.
+
+For a provider adapter that reports `PROVIDER_INCOMPLETE` as a typed error,
+event metadata/usage/IDs are included but `text` remains `None`: current adapters
+do not expose partial response text on that failure path. This is an explicit
+source-fidelity limitation, not an assertion that the response body was empty.
 
 Existing structural behavior remains unchanged: at most one conformance
 correction is made. Transport retries remain independently governed by the

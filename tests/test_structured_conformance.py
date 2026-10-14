@@ -14,6 +14,7 @@ from generationengine import (
     TextGenerationResult,
     TextRequest,
 )
+from generationengine import client as client_module
 from generationengine.providers.errors import ProviderError
 from generationengine.types import ProviderRoute
 
@@ -90,6 +91,119 @@ async def test_native_parsed_candidate_is_still_locally_validated() -> None:
     assert result.observation.retry_count == 0
     assert result.observation.transport_retry_count == 0
     assert result.observation.provider_attempt_count == 2
+
+
+@pytest.mark.asyncio
+async def test_attempt_evidence_is_awaited_before_parse_and_each_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = ScriptedText(
+        [
+            _result(text="not-json", parsed=None, input_tokens=None, cached_input_tokens=None),
+            _result(provider_request_id="req-2", output_tokens=None),
+        ]
+    )
+    events = []
+
+    async def record(event) -> None:
+        events.append(event)
+
+    original_candidate = client_module.candidate_from_result
+
+    def check_hook_precedes_parse(result):
+        assert len(events) == len(provider.calls)
+        return original_candidate(result)
+
+    monkeypatch.setattr(client_module, "candidate_from_result", check_hook_precedes_parse)
+
+    result = await GenerationClient(text_provider=provider).generate_structured(
+        _request(), on_attempt_completed=record
+    )
+
+    assert result.parsed == {"name": "ok", "count": 1}
+    assert len(events) == 2
+    assert [event.ordinal for event in events] == [1, 2]
+    assert [event.kind for event in events] == ["initial", "conformance"]
+    assert events[0].operation_id == events[1].operation_id
+    assert events[0].event_id != events[1].event_id
+    assert events[0].text == "not-json"
+    assert events[0].input_tokens is None
+    assert events[0].cached_input_tokens is None
+    assert events[1].provider_request_id == "req-2"
+    assert events[1].output_tokens is None
+    assert result.observation.provider_attempt_count == 2
+    assert result.observation.conformance_retry_count == 1
+
+
+@pytest.mark.asyncio
+async def test_attempt_evidence_sink_failure_stops_before_conformance_followup() -> None:
+    provider = ScriptedText([_result(text="not-json", parsed=None), _result()])
+    events = []
+
+    async def fail_sink(event) -> None:
+        events.append(event)
+        raise OSError("private sink details")
+
+    with pytest.raises(GenerationEngineError) as exc:
+        await GenerationClient(text_provider=provider).generate_structured(
+            _request(), on_attempt_completed=fail_sink
+        )
+
+    assert exc.value.failure.code is FailureCode.ATTEMPT_EVIDENCE_PERSISTENCE_FAILED
+    assert "private sink details" not in exc.value.failure.message
+    assert len(events) == 1
+    assert len(provider.calls) == 1
+    assert exc.value.observation.provider_attempt_count == 1
+    assert exc.value.observation.conformance_retry_count == 0
+
+
+@pytest.mark.asyncio
+async def test_attempt_evidence_includes_returned_refusal_but_not_transport_failure() -> None:
+    events = []
+
+    async def record(event) -> None:
+        events.append(event)
+
+    refusal = ScriptedText([_result(refused=True)])
+    with pytest.raises(GenerationEngineError) as exc:
+        await GenerationClient(text_provider=refusal).generate_structured(
+            _request(), on_attempt_completed=record
+        )
+    assert exc.value.failure.code is FailureCode.PROVIDER_REFUSED
+    assert len(events) == 1
+    assert events[0].text == '{"name":"ok","count":1}'
+    assert events[0].response_status == "refused"
+
+    events.clear()
+    incomplete = ScriptedText(
+        [
+            ProviderError.from_code(
+                FailureCode.PROVIDER_INCOMPLETE,
+                provider_request_id="req-incomplete",
+                provider_response_id="resp-incomplete",
+                input_tokens=7,
+                output_tokens=3,
+            )
+        ]
+    )
+    with pytest.raises(GenerationEngineError):
+        await GenerationClient(text_provider=incomplete).generate_structured(
+            _request(max_transport_retries=0), on_attempt_completed=record
+        )
+    assert len(events) == 1
+    assert events[0].response_status == "incomplete"
+    assert events[0].text is None
+    assert events[0].provider_response_id == "resp-incomplete"
+    assert events[0].input_tokens == 7
+
+    events.clear()
+    transport = ScriptedText([ProviderError.from_code(FailureCode.PROVIDER_UNAVAILABLE)])
+    with pytest.raises(GenerationEngineError):
+        await GenerationClient(text_provider=transport).generate_structured(
+            _request(max_transport_retries=0), on_attempt_completed=record
+        )
+    assert events == []
+    assert len(transport.calls) == 1
 
 
 @pytest.mark.asyncio
