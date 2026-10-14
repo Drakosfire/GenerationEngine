@@ -1,6 +1,6 @@
 # Structured attempt completion evidence
 
-**Status:** ACTIVE — GE implementation slice
+**Status:** COMPLETE — accepted and merged
 **Owner:** GenerationEngine
 **Scope:** opt-in evidence hook for non-streaming `GenerationClient.generate_structured()`
 
@@ -56,8 +56,14 @@ source-fidelity limitation, not an assertion that the response body was empty.
 Existing structural behavior remains unchanged: at most one conformance
 correction is made. Transport retries remain independently governed by the
 existing request/deadline policy; this callback is not an authorization ceiling.
-Every actual returned response is accounted for. No live provider invocation is
-authorized by this contract work.
+Every actual returned response is accounted for. No live provider invocation was used in this contract work.
+
+## Acceptance record
+
+- PR: [#19](https://github.com/Drakosfire/GenerationEngine/pull/19)
+- Reviewed head: `a4bd256b5ffd9dfbc3d41ea6f88e83fac242a428`
+- Review: ARCH APPROVE; PRIME review comment `6158161330`
+- Merge commit: `e4b683a459d9f0dfaa2a41d8b073ff6117c3aa6e`
 
 ## Minimal write set
 
@@ -82,4 +88,4 @@ failures without a returned body, refusal/incomplete response inclusion when a
 result is returned, stable IDs and attempt kinds/ordinals, and exact preservation
 of null usage. No live provider is used.
 
-This handoff remains ACTIVE until exact-head review accepts the implementation.
+This handoff is complete. Further consumer integration is a separate capability and is not authorized by this handoff.
