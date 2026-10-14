@@ -21,6 +21,29 @@ class GenerationEngineError(Exception):
         self.observation = observation
 
 
+class StructuredAttemptCompleted(BaseModel):
+    """Private-to-consumer evidence for one returned structured provider response."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    operation_id: str = Field(min_length=1)
+    event_id: str = Field(min_length=1)
+    ordinal: int = Field(ge=1)
+    kind: Literal["initial", "conformance"]
+    response_status: Literal["returned", "refused", "incomplete"] = "returned"
+    provider: str
+    requested_model: str | None
+    resolved_model: str
+    response_model: str | None
+    provider_request_id: str | None
+    provider_response_id: str | None
+    text: str | None
+    input_tokens: int | None = Field(default=None, ge=0)
+    cached_input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    reasoning_tokens: int | None = Field(default=None, ge=0)
+
+
 class ProviderRoute(BaseModel):
     """An explicit, ordered upstream provider route for text execution."""
 

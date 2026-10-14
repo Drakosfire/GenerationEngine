@@ -23,6 +23,7 @@ def test_all_accepted_failure_codes_exist() -> None:
         "PROVIDER_ERROR",
         "MALFORMED_PROVIDER_RESPONSE",
         "STRUCTURED_OUTPUT_INVALID",
+        "ATTEMPT_EVIDENCE_PERSISTENCE_FAILED",
         "STREAM_INCOMPLETE",
         "INTERNAL_ERROR",
     }

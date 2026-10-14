@@ -43,6 +43,7 @@ from generationengine.types import (
     ImageResult,
     ScoreDecisionAnswer,
     ScoreDecisionQuestion,
+    StructuredAttemptCompleted,
     TextRequest,
     TextResult,
 )
@@ -91,6 +92,7 @@ __all__ = [
     "TextProvider",
     "TextRequest",
     "TextResult",
+    "StructuredAttemptCompleted",
     "TextStreamEvent",
     "resolve",
 ]
