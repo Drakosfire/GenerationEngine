@@ -136,6 +136,62 @@ async def test_attempt_evidence_is_awaited_before_parse_and_each_repair(
 
 
 @pytest.mark.asyncio
+async def test_attempt_evidence_accounts_for_conformance_and_transport_retry_mix() -> None:
+    provider = ScriptedText(
+        [
+            _result(
+                text="not-json-first",
+                parsed=None,
+                provider_request_id="req-initial",
+                provider_response_id="resp-initial",
+                input_tokens=11,
+                cached_input_tokens=2,
+                output_tokens=3,
+                reasoning_tokens=1,
+            ),
+            ProviderError.from_code(FailureCode.RATE_LIMITED),
+            _result(
+                text='{"name":1}',
+                parsed=None,
+                provider_request_id="req-final",
+                provider_response_id="resp-final",
+                input_tokens=5,
+                cached_input_tokens=None,
+                output_tokens=7,
+                reasoning_tokens=None,
+            ),
+        ]
+    )
+    events = []
+
+    async def record(event) -> None:
+        events.append(event)
+
+    with pytest.raises(GenerationEngineError) as exc:
+        await GenerationClient(text_provider=provider).generate_structured(
+            _request(), on_attempt_completed=record
+        )
+
+    assert exc.value.failure.code is FailureCode.STRUCTURED_OUTPUT_INVALID
+    assert len(provider.calls) == 3
+    assert len(events) == 2
+    assert [event.ordinal for event in events] == [1, 3]
+    assert [event.kind for event in events] == ["initial", "conformance"]
+    assert events[0].operation_id == events[1].operation_id
+    assert events[0].event_id != events[1].event_id
+    assert [event.provider_request_id for event in events] == ["req-initial", "req-final"]
+    assert [event.provider_response_id for event in events] == ["resp-initial", "resp-final"]
+    assert [event.text for event in events] == ["not-json-first", '{"name":1}']
+    assert [event.input_tokens for event in events] == [11, 5]
+    assert [event.cached_input_tokens for event in events] == [2, None]
+    assert [event.output_tokens for event in events] == [3, 7]
+    assert [event.reasoning_tokens for event in events] == [1, None]
+    assert exc.value.observation.provider_attempt_count == 3
+    assert exc.value.observation.transport_retry_count == 1
+    assert exc.value.observation.conformance_retry_count == 1
+
+
+@pytest.mark.asyncio
 async def test_attempt_evidence_sink_failure_stops_before_conformance_followup() -> None:
     provider = ScriptedText([_result(text="not-json", parsed=None), _result()])
     events = []
