@@ -587,3 +587,40 @@ HTTP API for GenerationEngine
 moderation as an undeclared extra capability
 ecosystem-wide model policy copied from products
 ```
+
+
+## Opt-in decision dispatch authorization
+
+`generationengine.decision_dispatch` supplies `DecisionDispatchGate`,
+`PreparedDecisionDispatch` and `DecisionDispatchEvent`. A provider that supports
+this optional gate exposes its actual SDK-serialized, uncompressed request body
+as immutable bytes, SHA-256 and size, together with attempt ID, provider,
+transport, model, HTTP method and exact destination. Secret headers are excluded.
+Body bytes may contain private caller data; storage and authorization are owned
+by the calling product. This is a transport entity, not the entire HTTP wire or
+an estimate of provider token usage.
+
+The TypeSafe adapter accepts `dispatch_gate=...`. The official SDK serializes the
+request before the product's async `authorize(request)` callback runs. Only an
+explicit `True` permits progress. The product must also acknowledge
+`record(event)` with explicit `True`. The lifecycle is:
+
+- `sending`: acknowledged before entering the underlying HTTP transport;
+- `known_not_sent`: authorization, pre-send recording or request-integrity failure;
+- `response_received`: HTTP response headers/status returned, before SDK parsing;
+- `outcome_unknown`: transport entry occurred but no response was acknowledged.
+
+`response_received` does not mean a valid decision or complete response body.
+A timeout/cancellation after transport entry is conservatively unknown even if
+no bytes ultimately left the machine. Callback failures propagate as failed
+execution; a failed terminal record does not establish a durable terminal event.
+The product must reconcile its pending records and must not replay an uncertain
+request. GE does not persist events or grant authorization itself.
+
+Guarded TypeSafe execution disables SDK compression/retries, HTTP redirects and
+transport retries, and never automatically retries through GE, even when the
+request otherwise allows transport retries. The product selects and validates
+its permitted model and scope from the actual prepared request. Concurrent
+requests have distinct attempt IDs and independent lifecycle records. Closing
+the owning provider closes the injected transport. An injected SDK client cannot
+be combined with a dispatch gate. Unguarded provider behavior is unchanged.

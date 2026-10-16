@@ -24,7 +24,8 @@ from typesafe_sdk import (
     TypeSafeUnprocessableEntityError,
 )
 
-from generationengine.failures import FailureCode
+from generationengine.decision_dispatch import DecisionDispatchGate
+from generationengine.failures import FailureCode, Retryability
 from generationengine.providers.base import DecisionGenerationCall, DecisionGenerationResult
 from generationengine.providers.errors import ProviderError
 from generationengine.types import (
@@ -43,7 +44,19 @@ TRANSPORT = "vercel_ai_gateway"
 class TypeSafeDecisionProvider:
     """Keep SDK questions, credentials, transport and failures behind this adapter."""
 
-    def __init__(self, *, api_key: str | None = None, client: Any | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        client: Any | None = None,
+        dispatch_gate: DecisionDispatchGate | None = None,
+        transport: Any | None = None,
+    ) -> None:
+        self._guarded = dispatch_gate is not None
+        if (client is not None and dispatch_gate is not None) or (
+            transport is not None and dispatch_gate is None
+        ):
+            raise ValueError("Guarded dispatch requires the official SDK and an explicit gate")
         if client is not None:
             self._client = client
             self._owns_client = False
@@ -57,9 +70,26 @@ class TypeSafeDecisionProvider:
             )
         try:
             # GE owns retries. The SDK must make exactly one HTTP attempt per call.
-            self._client = AsyncTypeSafeClient(
-                api_key=key, base_url=GATEWAY_BASE_URL, retry=RetryPolicy(max_retries=0)
-            )
+            if dispatch_gate is not None:
+                import httpx2
+
+                from generationengine.providers.typesafe_dispatch import GuardedTypeSafeTransport
+
+                wire = GuardedTypeSafeTransport(
+                    dispatch_gate, transport or httpx2.AsyncHTTPTransport(retries=0)
+                )
+                http = httpx2.AsyncClient(transport=wire, follow_redirects=False)
+                self._client = AsyncTypeSafeClient(
+                    api_key=key,
+                    base_url=GATEWAY_BASE_URL,
+                    retry=RetryPolicy(max_retries=0),
+                    http_client=http,
+                    compression=False,
+                )
+            else:
+                self._client = AsyncTypeSafeClient(
+                    api_key=key, base_url=GATEWAY_BASE_URL, retry=RetryPolicy(max_retries=0)
+                )
         except TypeSafeError as exc:
             raise ProviderError.from_code(
                 FailureCode.CONFIGURATION_UNAVAILABLE,
@@ -81,11 +111,16 @@ class TypeSafeDecisionProvider:
             )
         questions = _questions(call)
         try:
-            response = await self._client.system_one(
-                call.state, questions, model=call.model
-            )
+            response = await self._client.system_one(call.state, questions, model=call.model)
+        except ProviderError:
+            raise
         except Exception as exc:
-            raise _map_exception(exc) from exc
+            mapped = _map_exception(exc)
+            if self._guarded:
+                # A guarded invocation never silently redispatches after a send
+                # or uncertain lifecycle. The product decides subsequent work.
+                mapped.failure = mapped.failure.model_copy(update={"retryability": Retryability.NO})
+            raise mapped from exc
         metadata = _response_metadata(response)
         try:
             answers = _answers(call, response)
@@ -114,10 +149,12 @@ def _questions(call: DecisionGenerationCall) -> dict[str, Any]:
     for question in call.questions:
         if isinstance(question, BinaryDecisionQuestion):
             criteria = {
-                key: value for key, value in (
+                key: value
+                for key, value in (
                     ("true", question.true_description),
                     ("false", question.false_description),
-                ) if value is not None
+                )
+                if value is not None
             }
             questions[question.name] = Noul(
                 instructions=question.question, criteria=criteria or None
@@ -127,7 +164,8 @@ def _questions(call: DecisionGenerationCall) -> dict[str, Any]:
                 instructions=question.question,
                 criteria={
                     label: question.option_descriptions[label]
-                    if question.option_descriptions is not None else None
+                    if question.option_descriptions is not None
+                    else None
                     for label in question.options
                 },
             )
@@ -156,13 +194,17 @@ def _answers(call: DecisionGenerationCall, response: Any) -> dict[str, Any]:
             )
         elif isinstance(question, ScoreDecisionQuestion) and answer.type == "score":
             indices = set(range(len(question.levels)))
-            if set(answer.legend) != indices or set(answer.probabilities) != indices or any(
-                answer.legend[index] != level for index, level in enumerate(question.levels)
+            if (
+                set(answer.legend) != indices
+                or set(answer.probabilities) != indices
+                or any(answer.legend[index] != level for index, level in enumerate(question.levels))
             ):
                 raise ValueError("Score legend differs from requested rubric")
             answers[question.name] = ScoreDecisionAnswer(
                 score=answer.score,
-                distribution={question.levels[index]: value for index, value in answer.probabilities.items()},
+                distribution={
+                    question.levels[index]: value for index, value in answer.probabilities.items()
+                },
                 confidence=answer.confidence,
             )
         else:
@@ -189,7 +231,9 @@ def _response_metadata(response: Any) -> dict[str, Any]:
         "response_model": model if isinstance(model, str) and model.strip() else None,
         "provider_transport": TRANSPORT,
         "input_tokens": input_tokens if type(input_tokens) is int and input_tokens >= 0 else None,
-        "output_tokens": output_tokens if type(output_tokens) is int and output_tokens >= 0 else None,
+        "output_tokens": output_tokens
+        if type(output_tokens) is int and output_tokens >= 0
+        else None,
     }
 
 
@@ -199,7 +243,8 @@ def _map_exception(exc: Exception) -> ProviderError:
     if isinstance(exc, (TypeSafeAuthenticationError, TypeSafePermissionDeniedError)):
         return ProviderError.from_code(
             FailureCode.CONFIGURATION_UNAVAILABLE,
-            "TypeSafe rejected the configured credential.", **fields
+            "TypeSafe rejected the configured credential.",
+            **fields,
         )
     if isinstance(exc, TypeSafeRateLimitError):
         return ProviderError.from_code(FailureCode.RATE_LIMITED, **fields)
@@ -208,7 +253,8 @@ def _map_exception(exc: Exception) -> ProviderError:
     if isinstance(exc, TypeSafeAPIResponseValidationError):
         return ProviderError.from_code(
             FailureCode.MALFORMED_PROVIDER_RESPONSE,
-            "TypeSafe response failed SDK validation.", **fields
+            "TypeSafe response failed SDK validation.",
+            **fields,
         )
     if isinstance(exc, (TypeSafeBadRequestError, TypeSafeUnprocessableEntityError)):
         return ProviderError.from_code(
