@@ -624,3 +624,36 @@ its permitted model and scope from the actual prepared request. Concurrent
 requests have distinct attempt IDs and independent lifecycle records. Closing
 the owning provider closes the injected transport. An injected SDK client cannot
 be combined with a dispatch gate. Unguarded provider behavior is unchanged.
+
+
+## Opt-in text dispatch authorization
+
+`generationengine.text_dispatch` supplies `TextDispatchGate`,
+`PreparedTextDispatch` and `TextDispatchEvent`. The OpenAI text adapter accepts
+`dispatch_gate=...` for ordinary, nonstreaming Responses calls. The actual SDK
+serializes the body before consumer authorization. Immutable bytes, SHA-256,
+size, UUID attempt ID, provider, API mode, model, method and exact destination
+are exposed; authentication headers are not. Body bytes may contain caller data.
+
+This bounded mode sends POST `https://api.openai.com/v1/responses` with explicit
+`tools=[]` and `stream=false`. It pins that destination instead of inheriting an
+environment base URL. SDK and GE transport retries, redirects and ambient proxy
+routing are disabled. The consumer can inject an HTTP transport for testing but
+cannot combine an injected SDK client with a gate. Default execution is unchanged.
+Streaming and JSON-schema structural repair are rejected before provider I/O;
+ordinary JSON-object text mode remains supported without local repair.
+
+Authorization and lifecycle callbacks must return explicit `True`. Lifecycle
+uses the same meanings as the decision gate: `sending` before underlying
+transport entry; `known_not_sent` for pre-entry failure; `outcome_unknown` after
+entry failure/cancellation; `response_received` when HTTP headers/status return,
+before body completion or SDK parsing. A malformed/incomplete body does not
+undo a response-header acknowledgment. Failed terminal acknowledgment is not a
+durable terminal record. Products reconcile pending/unknown attempts and own
+subsequent authorization; this gate supplies no permissions or persistence.
+Closing the provider closes its owned SDK client and injected HTTP transport.
+
+The supported OpenAI SDK `http_client` injection and `max_retries=0` are documented
+in the [official Python reference](https://developers.openai.com/api/reference/python).
+Tests exercise the installed locked SDK 2.14.0 with HTTPX; this slice does not
+upgrade the SDK to the newer HTTPX2 documentation implementation.

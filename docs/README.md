@@ -29,10 +29,10 @@ Current `main` includes the accepted E2/E5 contract work through deterministic c
 - normalized observations/failures;
 - deterministic terminal `await GenerationClient.aclose()`;
 - typed decisions through the optional TypeSafe adapter;
-- opt-in authorization and lifecycle acknowledgment over actual decision request bytes.
+- opt-in authorization and lifecycle acknowledgment over actual decision and ordinary OpenAI text request bytes.
 
-The bounded dispatch-gate work is tracked in
-[HANDOFF-decision-dispatch-gate.md](Handoffs/HANDOFF-decision-dispatch-gate.md).
+The decision dispatch gate is settled through GE #20. Its current text successor
+is tracked in [HANDOFF-openai-responses-dispatch.md](Handoffs/HANDOFF-openai-responses-dispatch.md).
 Product adoption and persistence remain consumer-owned.
 
 ## Directory policy

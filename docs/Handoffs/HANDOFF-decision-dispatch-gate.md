@@ -1,6 +1,9 @@
 # Decision dispatch authorization boundary
 
-ACTIVE. PRIME implementation solo; ARCHITECTURE independent review. Operator goal
+SETTLED — GE #20 merged at dde768f3e632af20b969cc694d8318265ce6ff5c.
+Successor: [OpenAI Responses dispatch](HANDOFF-openai-responses-dispatch.md).
+
+PRIME implementation solo; ARCHITECTURE independent review. Operator goal
 requires ordinary Buddy Jev acquisition plus one writer under durable authorization.
 GenerationEngine owns provider wire/lifecycle truth; Buddy owns authorization policy,
 roles, source scope, persistence and Graph broker. No runtime reads OverMind config.
