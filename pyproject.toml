@@ -25,7 +25,7 @@ fal = [
     "fal-client>=0.5.6",
 ]
 typesafe = [
-    "typesafe-sdk>=0.7.1,<0.8",
+    "typesafe-sdk>=0.7.5,<0.8",
 ]
 
 [build-system]

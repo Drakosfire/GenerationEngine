@@ -5,7 +5,7 @@ requires ordinary Buddy Jev acquisition plus one writer under durable authorizat
 GenerationEngine owns provider wire/lifecycle truth; Buddy owns authorization policy,
 roles, source scope, persistence and Graph broker. No runtime reads OverMind config.
 
-Baseafe824d1e54cf7d54a58bc9aa92a1cf0234f73ec; branch
+Base afe824d1e54cf7d54a58bc9aa92a1cf0234f73ec; branch
 codex/decision-dispatch-port; isolated /tmp/prime-ge-authorized-dispatch.
 Serial prerequisite before Buddy consumer; no open GE PRs/overlapping leases found.
 
@@ -22,7 +22,7 @@ trigger GE retries. Default provider behavior unchanged.
 Writes: this handoff; src/generationengine/decision_dispatch.py;
 src/generationengine/providers/typesafe_dispatch.py;
 src/generationengine/providers/typesafe_decision.py; tests/test_typesafe_dispatch.py;
-docs/CORE-CONTRACT.md; docs/CURRENT-STATE.md; docs/README.md.
+docs/CORE-CONTRACT.md; docs/CURRENT-STATE.md; docs/README.md; pyproject.toml; uv.lock.
 No product prompts/roles/persistence, credential changes, provider/model selection,
 new provider, live calls, SDK monkeypatch or serving changes.
 
@@ -32,3 +32,11 @@ authorization/callback cancellation/error before send; timeout/cancel after send
 HTTP response+parse failure; one attempt even when caller permits retries; resource
 closure and concurrency. Independently review exact cumulative diff and broader GE
 gates for the shared optional contract before merge. Buddy adoption remains separate.
+
+The locked SDK 0.7.1 lacks explicit compression control. Raise the TypeSafe extra
+minimum to 0.7.5 and lock it, the already-tested experiment SDK, so guarded requests
+can guarantee uncompressed approved bytes through supported SDK APIs. Unguarded GE
+control flow remains unchanged; SDK transport defaults are SDK-owned.
+
+The handoff moved from docs/Plans to docs/Handoffs to follow the repository's
+existing documentation-authority invariant; its first commit remains pinned in Git.

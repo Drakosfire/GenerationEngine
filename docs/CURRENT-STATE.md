@@ -23,6 +23,18 @@ Public request/result/failure/observation types are exported from `generationeng
 
 The generic `DECISION` capability has provider-neutral Binary, Choice, and Score questions/results and a distinct `DecisionProvider` execution seam. `decide()` requires an explicit registered decision provider and model, validates JSON-safe state and typed answer alignment, and applies the existing overall deadline, transport retry, and normalized failure rules. The optional `typesafe` extra wires the first provider adapter through the official async SDK and the Vercel AI Gateway route with SDK retries disabled. The adapter reads `TYPESAFE_JEV_API_KEY` itself. No text fallback or decision profile is added.
 
+### Prepared dispatch gate
+
+The optional TypeSafe adapter now accepts a product-owned `DecisionDispatchGate`
+from `generationengine.decision_dispatch`. It authorizes actual SDK-serialized
+body bytes before HTTP I/O and records sending, known-not-sent, response-header
+acknowledgment and uncertain outcomes. This mode disables compression, redirects
+and all automatic retries; failed lifecycle acknowledgment fails execution.
+The TypeSafe extra requires SDK 0.7.5 for supported compression control.
+Actual SDK serialization, concurrent calls and failure boundaries are tested with
+mock HTTP transports; this feature does not claim a live provider witness or
+product adoption. See the [dispatch contract](CORE-CONTRACT.md#opt-in-decision-dispatch-authorization).
+
 ## Text execution
 
 Registered text providers:

@@ -27,9 +27,13 @@ Current `main` includes the accepted E2/E5 contract work through deterministic c
 - schema-less JSON-object ordinary text mode;
 - provider-independent structured conformance with bounded repair;
 - normalized observations/failures;
-- deterministic terminal `await GenerationClient.aclose()`.
+- deterministic terminal `await GenerationClient.aclose()`;
+- typed decisions through the optional TypeSafe adapter;
+- opt-in authorization and lifecycle acknowledgment over actual decision request bytes.
 
-There is no active GenerationEngine implementation handoff in this repository at this revision.
+The bounded dispatch-gate work is tracked in
+[HANDOFF-decision-dispatch-gate.md](Handoffs/HANDOFF-decision-dispatch-gate.md).
+Product adoption and persistence remain consumer-owned.
 
 ## Directory policy
 
