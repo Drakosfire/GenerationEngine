@@ -651,6 +651,11 @@ before body completion or SDK parsing. A malformed/incomplete body does not
 undo a response-header acknowledgment. Failed terminal acknowledgment is not a
 durable terminal record. Products reconcile pending/unknown attempts and own
 subsequent authorization; this gate supplies no permissions or persistence.
+Guarded text success additionally requires SDK response status `completed`, no
+response error, and nonblank output text. An HTTP200 response with failed,
+nonterminal, missing or unknown status cannot become a successful text result,
+even when it contains residual valid text. Failure observations preserve safe
+provider IDs/model and reported usage, without residual text or raw error detail.
 Closing the provider closes its owned SDK client and injected HTTP transport.
 
 The supported OpenAI SDK `http_client` injection and `max_retries=0` are documented

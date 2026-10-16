@@ -31,8 +31,8 @@ Current `main` includes the accepted E2/E5 contract work through deterministic c
 - typed decisions through the optional TypeSafe adapter;
 - opt-in authorization and lifecycle acknowledgment over actual decision and ordinary OpenAI text request bytes.
 
-The decision dispatch gate is settled through GE #20. Its current text successor
-is tracked in [HANDOFF-openai-responses-dispatch.md](Handoffs/HANDOFF-openai-responses-dispatch.md).
+The dispatch gates are settled through GE #20 and #21. The active repair is
+[guarded response terminal truth](Handoffs/HANDOFF-openai-guarded-terminal-status.md).
 Product adoption and persistence remain consumer-owned.
 
 ## Directory policy
