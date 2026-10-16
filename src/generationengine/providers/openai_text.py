@@ -6,7 +6,7 @@ import os
 from collections.abc import AsyncIterator
 from typing import Any
 
-from generationengine.failures import FailureCode, InferenceFailure
+from generationengine.failures import FailureCode, InferenceFailure, Retryability
 from generationengine.observation import InferenceObservation, ObservationState
 from generationengine.providers.base import (
     TextCompleted,
@@ -22,11 +22,24 @@ from generationengine.providers.openai_compatible import (
     map_openai_compatible_exception,
     require_openai_sdk,
 )
+from generationengine.text_dispatch import TextDispatchGate
 from generationengine.utils.schema_utils import make_schema_strict
 
 
 class OpenAITextProvider:
-    def __init__(self, client: Any | None = None, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        client: Any | None = None,
+        api_key: str | None = None,
+        *,
+        dispatch_gate: TextDispatchGate | None = None,
+        transport: Any | None = None,
+    ) -> None:
+        self._guarded = dispatch_gate is not None
+        if (client is not None and dispatch_gate is not None) or (
+            transport is not None and dispatch_gate is None
+        ):
+            raise ValueError("Guarded dispatch requires the official SDK and an explicit gate")
         if client is not None:
             self._client = client
             return
@@ -37,20 +50,45 @@ class OpenAITextProvider:
                 FailureCode.CONFIGURATION_UNAVAILABLE,
                 "OPENAI_API_KEY is required for text generation.",
             )
-        self._client = AsyncOpenAI(api_key=key, max_retries=0)
+        if dispatch_gate is not None:
+            import httpx
+
+            from generationengine.providers.openai_dispatch import GuardedOpenAITransport
+
+            wire = GuardedOpenAITransport(
+                dispatch_gate, transport or httpx.AsyncHTTPTransport(retries=0)
+            )
+            http = httpx.AsyncClient(transport=wire, follow_redirects=False, trust_env=False)
+            self._client = AsyncOpenAI(
+                api_key=key,
+                max_retries=0,
+                base_url="https://api.openai.com/v1",
+                http_client=http,
+            )
+        else:
+            self._client = AsyncOpenAI(api_key=key, max_retries=0)
 
     async def aclose(self) -> None:
         await self._client.close()
 
     async def generate(self, call: TextGenerationCall) -> TextGenerationResult:
+        if self._guarded and call.json_schema is not None:
+            raise ProviderError.from_code(
+                FailureCode.INVALID_REQUEST,
+                "Guarded text dispatch does not support structural repair.",
+            )
         kwargs = self._request_kwargs(call)
+        if self._guarded:
+            kwargs.update(tools=[], stream=False)
         try:
             response = await self._client.responses.create(**kwargs)
         except Exception as exc:
-            raise self._map_exception(exc) from exc
-        if (
-            getattr(response, "status", None) == "incomplete"
-            and not getattr(response, "refusal", None)
+            mapped = self._map_exception(exc)
+            if self._guarded:
+                mapped.failure = mapped.failure.model_copy(update={"retryability": Retryability.NO})
+            raise mapped from exc
+        if getattr(response, "status", None) == "incomplete" and not getattr(
+            response, "refusal", None
         ):
             request_id, response_id = _ids_from_response(response)
             usage = _usage_from_response(response)
@@ -64,6 +102,12 @@ class OpenAITextProvider:
         return self._result_from_response(response)
 
     async def stream(self, call: TextGenerationCall) -> AsyncIterator[TextStreamEvent]:
+        if self._guarded:
+            failure = InferenceFailure.from_code(
+                FailureCode.INVALID_REQUEST, "Guarded text dispatch does not support streaming."
+            )
+            yield TextFailed(failure=failure, observation=_empty_failed_observation(failure.code))
+            return
         kwargs = self._request_kwargs(call, streaming=True)
         pieces: list[str] = []
         try:
@@ -123,7 +167,9 @@ class OpenAITextProvider:
                 observation=_empty_failed_observation(mapped.failure.code),
             )
 
-    def _request_kwargs(self, call: TextGenerationCall, *, streaming: bool = False) -> dict[str, Any]:
+    def _request_kwargs(
+        self, call: TextGenerationCall, *, streaming: bool = False
+    ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {
             "model": call.model,
             "input": call.user_prompt,

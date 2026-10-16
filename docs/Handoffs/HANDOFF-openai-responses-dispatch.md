@@ -1,7 +1,7 @@
 # OpenAI Responses dispatch authorization
 
 ACTIVE. PRIME implements; ARCHITECTURE independently reviews. Base
- dde768f3e632af20b969cc694d8318265ce6ff5c; branch codex/openai-responses-dispatch,
+dde768f3e632af20b969cc694d8318265ce6ff5c; branch codex/openai-responses-dispatch,
 isolated non-serving /tmp/prime-ge-authorized-dispatch. No overlapping GE PRs.
 
 One capability: opt-in authorization/lifecycle over actual official OpenAI SDK
@@ -12,7 +12,8 @@ method and exact destination without credential headers. Use supported SDK
 http_client injection; no SDK internals, Agent runtime or monkeypatch.
 
 Guarded dispatch permits only POST https://api.openai.com/v1/responses,
-nonstreaming, with tools=[] explicitly. Disable SDK/HTTP/GE retries and redirects;
+nonstreaming ordinary text, with tools=[] explicitly. Structural repair is
+rejected before I/O; ordinary JSON-object mode has no repair. Disable SDK/HTTP/GE retries and redirects;
 callback denial or failure prevents send. Record sending before transport entry,
 known_not_sent before entry failures, outcome_unknown after entry failures, and
 response_received on headers before SDK parsing. Consumers reconcile uncertain
