@@ -98,7 +98,7 @@ class OpenAITextProvider:
                 or not text.strip()
             ):
                 request_id, response_id = _ids_from_response(response)
-                raise ProviderError.from_code(
+                terminal_failure = ProviderError.from_code(
                     FailureCode.PROVIDER_ERROR
                     if status == "failed" or error is not None
                     else FailureCode.PROVIDER_INCOMPLETE,
@@ -107,6 +107,10 @@ class OpenAITextProvider:
                     response_model=getattr(response, "model", None),
                     **_usage_from_response(response),
                 )
+                terminal_failure.failure = terminal_failure.failure.model_copy(
+                    update={"retryability": Retryability.NO}
+                )
+                raise terminal_failure
         if getattr(response, "status", None) == "incomplete" and not getattr(
             response, "refusal", None
         ):

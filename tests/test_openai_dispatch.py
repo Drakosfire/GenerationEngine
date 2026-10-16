@@ -458,6 +458,7 @@ async def test_residual_text_does_not_make_unsuccessful_response_successful(stat
         with pytest.raises(GenerationEngineError) as error:
             await engine.generate_text(request())
         observation = error.value.observation
+        assert error.value.failure.retryability.value == "no"
         assert observation.state.value != "completed"
         assert observation.provider_attempt_count == 1 and observation.retry_count == 0
         assert observation.provider_request_id == "req_synthetic"
