@@ -103,7 +103,10 @@ The OpenAI adapter accepts opt-in `TextDispatchGate` from
 `generationengine.text_dispatch`. It authorizes exact SDK-serialized nonstreaming
 Responses bytes with an explicit empty tool list and no automatic transport
 retries, redirects or ambient proxy routing. Actual headers/outcome uncertainty
-are distinct from response-body parsing. Streaming and structural-repair requests
+are distinct from response-body parsing. Guarded text success requires SDK status
+completed, no response error and nonblank text; residual output from failed or
+nonterminal responses fails without retry and retains safe IDs/model/usage.
+Streaming and structural-repair requests
 are rejected on a guarded provider. Existing unguarded execution is unchanged.
 Synthetic real-SDK/mock-HTTP tests prove the boundary; live provider and product
 adoption remain separate. See [text dispatch contract](CORE-CONTRACT.md#opt-in-text-dispatch-authorization).

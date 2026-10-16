@@ -1,6 +1,9 @@
 # OpenAI Responses dispatch authorization
 
-ACTIVE. PRIME implements; ARCHITECTURE independently reviews. Base
+SETTLED — GE #21 merged at 4aade6b34d64edbdc3d1cacb0a89d185663e2268.
+Successor: [terminal truth repair](HANDOFF-openai-guarded-terminal-status.md).
+
+PRIME implements; ARCHITECTURE independently reviews. Base
 dde768f3e632af20b969cc694d8318265ce6ff5c; branch codex/openai-responses-dispatch,
 isolated non-serving /tmp/prime-ge-authorized-dispatch. No overlapping GE PRs.
 

@@ -412,3 +412,62 @@ async def test_body_failure_preserves_response_headers_acknowledgment():
         await engine.aclose()
     assert len(wire.calls) == 1 and wire.response.is_closed
     assert [e.outcome for e in events] == ["sending", "response_received"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status",
+    [
+        "failed",
+        "cancelled",
+        "queued",
+        "in_progress",
+        "incomplete",
+        "unknown",
+        None,
+        "completed_with_error",
+        "empty",
+        "blank",
+    ],
+)
+async def test_residual_text_does_not_make_unsuccessful_response_successful(status):
+    class StatusWire(Wire):
+        async def handle_async_request(self, req):
+            response = await super().handle_async_request(req)
+            data = json.loads(response.content)
+            if status in {"empty", "blank"}:
+                data["output"][0]["content"][0]["text"] = "" if status == "empty" else "  \n"
+            else:
+                data["status"] = "completed" if status == "completed_with_error" else status
+                if status in {"failed", "completed_with_error"}:
+                    data["error"] = {"code": "server_error", "message": SECRET}
+            self.response = httpx.Response(200, json=data, headers=response.headers, request=req)
+            return self.response
+
+    wire, events = StatusWire(), []
+
+    async def authorize(_):
+        return True
+
+    async def record(event):
+        events.append(event)
+        return True
+
+    engine = client(wire, authorize, record)
+    try:
+        with pytest.raises(GenerationEngineError) as error:
+            await engine.generate_text(request())
+        observation = error.value.observation
+        assert error.value.failure.retryability.value == "no"
+        assert observation.state.value != "completed"
+        assert observation.provider_attempt_count == 1 and observation.retry_count == 0
+        assert observation.provider_request_id == "req_synthetic"
+        assert observation.provider_response_id == "resp_synthetic"
+        assert observation.response_model == "writer-test"
+        assert observation.input_tokens == 20 and observation.output_tokens == 8
+        assert SECRET not in str(error.value)
+        assert "Supported prose" not in observation.model_dump_json()
+    finally:
+        await engine.aclose()
+    assert len(wire.calls) == 1 and wire.closed
+    assert [e.outcome for e in events] == ["sending", "response_received"]

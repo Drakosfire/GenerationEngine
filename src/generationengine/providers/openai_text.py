@@ -87,6 +87,30 @@ class OpenAITextProvider:
             if self._guarded:
                 mapped.failure = mapped.failure.model_copy(update={"retryability": Retryability.NO})
             raise mapped from exc
+        if self._guarded:
+            status = getattr(response, "status", None)
+            text = getattr(response, "output_text", None)
+            error = getattr(response, "error", None)
+            if (
+                status != "completed"
+                or error is not None
+                or not isinstance(text, str)
+                or not text.strip()
+            ):
+                request_id, response_id = _ids_from_response(response)
+                terminal_failure = ProviderError.from_code(
+                    FailureCode.PROVIDER_ERROR
+                    if status == "failed" or error is not None
+                    else FailureCode.PROVIDER_INCOMPLETE,
+                    provider_request_id=request_id,
+                    provider_response_id=response_id,
+                    response_model=getattr(response, "model", None),
+                    **_usage_from_response(response),
+                )
+                terminal_failure.failure = terminal_failure.failure.model_copy(
+                    update={"retryability": Retryability.NO}
+                )
+                raise terminal_failure
         if getattr(response, "status", None) == "incomplete" and not getattr(
             response, "refusal", None
         ):
