@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 
 MODEL_ENDPOINTS = {
+    "seedream-v5-pro": "bytedance/seedream/v5/pro/text-to-image",
+    "nano-banana-2-lite": "google/nano-banana-2-lite",
     "gpt-image-2.5-flare": "openai/gpt-image-2.5/flare/text-to-image",
     "gpt-image-2.5-sunburst": "openai/gpt-image-2.5/sunburst/text-to-image",
     "nano-banana-2.1": "google/nano-banana-2.1",
@@ -300,7 +302,21 @@ class FalProvider:
                     "background": "auto",
                     "output_format": "png",
                 }
-            elif model == "nano-banana-2.1":
+            elif model == "seedream-v5-pro":
+                if (
+                    any(type(n) is not int or n <= 0 for n in size)
+                    or not 1048576 <= size[0] * size[1] <= 4194304
+                    or max(size) / min(size) > 16
+                ):
+                    raise ProviderError.from_code(
+                        FailureCode.INVALID_REQUEST, "Unsupported Seedream image dimensions."
+                    )
+                arguments = {
+                    "prompt": prompt, "num_images": num_images,
+                    "image_size": {"width": size[0], "height": size[1]},
+                    "output_format": "png",
+                }
+            elif model in {"nano-banana-2.1", "nano-banana-2-lite"}:
                 ratio = self._size_to_aspect_ratio(size)
                 # fal names this reduced 7:3 ratio 21:9 on the Nano 2.1 route.
                 if ratio == "7:3":
@@ -323,7 +339,7 @@ class FalProvider:
                         "8:1",
                         "1:8",
                     }
-                    or num_images > 4
+                    or (model == "nano-banana-2.1" and num_images > 4)
                 ):
                     raise ProviderError.from_code(
                         FailureCode.INVALID_REQUEST, "Unsupported Nano Banana shape or image count."
@@ -332,9 +348,10 @@ class FalProvider:
                     "prompt": prompt,
                     "num_images": num_images,
                     "aspect_ratio": ratio,
-                    "resolution": "1K",
                     "output_format": "png",
                 }
+                if model == "nano-banana-2.1":
+                    arguments["resolution"] = "1K"
             elif model == "gpt-image-1.5":
                 size_str = self._size_to_gpt_image_size(size)
                 arguments = {
@@ -377,10 +394,12 @@ class FalProvider:
                 "gpt-image-2.5-flare": {"quality", "background", "output_format"},
                 "gpt-image-2.5-sunburst": {"quality", "background", "output_format"},
                 "nano-banana-2.1": {"seed", "output_format"},
+                "nano-banana-2-lite": {"seed", "output_format"},
+                "seedream-v5-pro": {"output_format"},
                 "flux-2-pro": {"seed", "output_format"},
             }.get(model, set())
             if set(explicit) - supported or (
-                model == "flux-2-pro" and options.output_format == "webp"
+                model in {"flux-2-pro", "seedream-v5-pro"} and options.output_format == "webp"
             ):
                 raise ProviderError.from_code(
                     FailureCode.INVALID_REQUEST,

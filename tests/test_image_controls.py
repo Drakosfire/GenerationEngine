@@ -19,6 +19,16 @@ from generationengine.providers.fal_provider import FalProvider
     ("model", "options", "wire"),
     [
         (
+            "seedream-v5-pro",
+            ImageOptions(output_format="jpeg"),
+            {"output_format": "jpeg", "image_size": {"width": 1024, "height": 1024}},
+        ),
+        (
+            "nano-banana-2-lite",
+            ImageOptions(seed=0, output_format="webp"),
+            {"seed": 0, "aspect_ratio": "1:1", "output_format": "webp"},
+        ),
+        (
             "gpt-image-2.5-flare",
             ImageOptions(quality="medium", output_format="webp"),
             {
@@ -69,6 +79,8 @@ async def test_controls_reach_paid_boundary(model, options, wire):
             ImageRequest(prompt="A swamp town", model=model, options=options)
         )
         endpoint = {
+            "seedream-v5-pro": "bytedance/seedream/v5/pro/text-to-image",
+            "nano-banana-2-lite": "google/nano-banana-2-lite",
             "gpt-image-2.5-flare": "openai/gpt-image-2.5/flare/text-to-image",
             "gpt-image-2.5-sunburst": "openai/gpt-image-2.5/sunburst/text-to-image",
             "nano-banana-2.1": "google/nano-banana-2.1",
@@ -86,6 +98,10 @@ async def test_controls_reach_paid_boundary(model, options, wire):
 @pytest.mark.parametrize(
     ("model", "options", "size"),
     [
+        ("seedream-v5-pro", ImageOptions(seed=0), (1024, 1024)),
+        ("seedream-v5-pro", ImageOptions(output_format="webp"), (1024, 1024)),
+        ("seedream-v5-pro", ImageOptions(), (512, 512)),
+        ("nano-banana-2-lite", ImageOptions(quality="high"), (1024, 1024)),
         ("nano-banana-2.1", ImageOptions(quality="high"), (1024, 1024)),
         ("gpt-image-2.5-flare", ImageOptions(seed=9), (1024, 1024)),
         ("gpt-image-2.5-sunburst", ImageOptions(), (777, 777)),
@@ -144,7 +160,14 @@ def test_options_reject_unknown_or_invalid_parameters():
             ImageOptions(**args)
 
 
-async def test_nano_ultrawide_uses_provider_ratio_spelling():
+@pytest.mark.parametrize(
+    "model,endpoint",
+    [
+        ("nano-banana-2.1", "google/nano-banana-2.1"),
+        ("nano-banana-2-lite", "google/nano-banana-2-lite"),
+    ],
+)
+async def test_nano_ultrawide_uses_provider_ratio_spelling(model, endpoint):
     with (
         patch("generationengine.providers.fal_provider.fal_client") as sdk,
         patch("generationengine.providers.fal_provider.httpx.AsyncClient") as http,
@@ -155,9 +178,14 @@ async def test_nano_ultrawide_uses_provider_ratio_spelling():
         response = MagicMock(content=b"\x89PNG\r\n\x1a\nimage")
         http.return_value.__aenter__.return_value.get = AsyncMock(return_value=response)
         client = GenerationClient(image_provider=FalProvider(api_key="synthetic"))
-        await client.generate_image(ImageRequest(
-            prompt="An ultrawide swamp", model="nano-banana-2.1", width=2100, height=900,
-        ))
+        await client.generate_image(
+            ImageRequest(
+                prompt="An ultrawide swamp",
+                model=model,
+                width=2100,
+                height=900,
+            )
+        )
         assert sdk.subscribe_async.call_count == 1
-        assert sdk.subscribe_async.call_args.args == ("google/nano-banana-2.1",)
+        assert sdk.subscribe_async.call_args.args == (endpoint,)
         assert sdk.subscribe_async.call_args.kwargs["arguments"]["aspect_ratio"] == "21:9"
