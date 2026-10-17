@@ -889,6 +889,7 @@ class GenerationClient:
                     mask_base64=request.mask_base64,
                     base_image_base64=request.base_image_base64,
                     negative_prompt=request.negative_prompt,
+                    **({"options": request.options} if request.options is not None else {}),
                 )
             except ProviderError:
                 raise
@@ -927,9 +928,9 @@ class GenerationClient:
         images = [
             GeneratedImage(
                 content=blob,
-                media_type="image/png",
-                width=request.width,
-                height=request.height,
+                media_type=_image_media_type(blob),
+                width=None,
+                height=None,
             )
             for blob in blobs
         ]
@@ -1405,3 +1406,14 @@ def _map_provider_exception(exc: Exception) -> ProviderError:
     if isinstance(exc, TimeoutError):
         return ProviderError.from_code(FailureCode.PROVIDER_TIMEOUT)
     return ProviderError.from_code(FailureCode.PROVIDER_ERROR)
+
+
+def _image_media_type(blob: bytes) -> str:
+    """Identify supported encodings from returned bytes, not requested options."""
+    if blob.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if blob.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if blob.startswith(b"RIFF") and blob[8:12] == b"WEBP":
+        return "image/webp"
+    return "application/octet-stream"

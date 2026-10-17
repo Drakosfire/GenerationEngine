@@ -13,6 +13,7 @@ import httpx
 
 from generationengine.failures import FailureCode
 from generationengine.providers.errors import ProviderError
+from generationengine.types import ImageOptions
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,7 @@ class FalProvider:
         mask_base64: str | None = None,
         base_image_base64: str | None = None,
         negative_prompt: str | None = None,
+        options: ImageOptions | None = None,
     ) -> list[bytes]:
         """
         Generate images using Fal.ai.
@@ -238,6 +240,28 @@ class FalProvider:
                 }
                 if negative_prompt:
                     arguments["negative_prompt"] = negative_prompt
+
+        if options is not None:
+            explicit = options.model_dump(exclude_none=True)
+            supported = {
+                "gpt-image-1.5": {"quality", "background", "output_format"},
+                "flux-2-pro": {"seed", "output_format"},
+            }.get(model, set())
+            if set(explicit) - supported or (
+                model == "flux-2-pro" and options.output_format == "webp"
+            ):
+                raise ProviderError.from_code(
+                    FailureCode.INVALID_REQUEST,
+                    "Selected image controls are unsupported by this model.",
+                )
+            if model == "gpt-image-1.5" and size not in {
+                (1024, 1024), (1536, 1024), (1024, 1536),
+            }:
+                raise ProviderError.from_code(
+                    FailureCode.INVALID_REQUEST,
+                    "Selected image dimensions are unsupported by this model.",
+                )
+            arguments.update(explicit)
 
         # Add image-to-image parameters if image_url is provided (not inpainting)
         if image_url and not is_inpainting:

@@ -205,7 +205,18 @@ class DecisionResult(BaseModel):
     observation: InferenceObservation
 
 
+class ImageOptions(BaseModel):
+    """Explicit portable image controls; adapters reject unsupported combinations."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    quality: Literal["low", "medium", "high"] | None = None
+    background: Literal["auto", "transparent", "opaque"] | None = None
+    seed: int | None = Field(default=None, strict=True, ge=0, le=4294967295)
+    output_format: Literal["png", "jpeg", "webp"] | None = None
+
+
 class ImageRequest(BaseModel):
+    options: ImageOptions | None = None
     prompt: str
     profile: InferenceProfile | None = None
     model: str | None = None
