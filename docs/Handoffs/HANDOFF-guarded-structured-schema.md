@@ -1,4 +1,6 @@
-# Guarded structured schema — ACTIVE
+# Guarded structured schema — SETTLED
+
+Merged GE#23 at28255c8142c190b8ccdfaeec0b1abd5d2456a001 after CIpassed,169 author tests and100 independent ARCHITECTURE tests. Buddy#1289 adopts the accepted pin and is deployed on5202/8000 and5876/8002; its synthetic strict-schema generation succeeded with one attempt and no repair. This implementation lease ended. Product/operator acceptance remains Buddy-owned. Original bounded authority follows.
 
 Operator authorized PRIME to fix guarded schema support, then adopt it for Buddy Build and deploy5202. PRIME implements; ARCHITECTURE independently reviews. GenerationEngine base5c69e7c55d2573a582a85ae11ba947160d5f142d, branch codex/guarded-structured-schema, /tmp/prime-ge-authorized-dispatch. No open GE PRs at activation. Serial GE prerequisite, then separate Buddy consumer pin; no serving changes in GE.
 
