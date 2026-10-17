@@ -506,6 +506,25 @@ Current implementation:
 
 GenerationEngine returns generated image content. It does not require Cloudflare, R2, or any durable store to execute image generation or editing.
 
+`ImageRequest.options` accepts an optional strict `ImageOptions` object. Omitted
+fields preserve the adapter defaults. Supported explicit fal controls are:
+
+- GPT Image 1.5: `quality` (`low`, `medium`, `high`), `background` (`auto`,
+  `transparent`, `opaque`), and `output_format` (`png`, `jpeg`, `webp`).
+- FLUX 2 Pro: unsigned 32-bit `seed`, and `output_format` (`png`, `jpeg`).
+- Other existing image models: no additional explicit controls yet.
+
+Unsupported combinations fail as `INVALID_REQUEST` before a fal submission.
+For GPT Image requests with options, dimensions must be one of 1024×1024,
+1536×1024 or 1024×1536; they are not silently rounded. Older requests without
+options retain their existing size translation. This contract does not expose
+arbitrary provider parameters or promise all models support the same controls.
+
+Returned PNG/JPEG/WebP MIME is identified from byte signatures; unrecognized
+encoding is `application/octet-stream`. Actual dimensions remain unknown (`None`)
+because the current provider protocol returns bytes, not verified dimensions.
+Requested dimensions are not presented as measured results.
+
 Current result shape:
 
 ```text

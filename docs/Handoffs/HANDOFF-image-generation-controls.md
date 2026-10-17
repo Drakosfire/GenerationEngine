@@ -21,3 +21,5 @@ Current fal schema references (reviewed 2026-10-16): https://fal.ai/models/fal-a
 ## Acceptance
 
 Exercise public client → fal adapter → mocked SDK boundary for explicit controls and rejection before submit. Prove unchanged omitted request forwarding, normalized unsupported errors, correct PNG/JPEG/WebP media labels and unknown actual dimensions. Run focused and full GE suites and Ruff; inspect cumulative diff; publish PR for independent review. Product owner retains wizard, prompting, authorization and durable artifact storage.
+
+Verification: 81 focused client/fal/control tests pass; complete GenerationEngine suite 293/293 passes with the existing environment/cache available. Initial sandboxed wheel-build test failed because uv's cache was read-only; the authorized full run resolves that environmental failure. Scoped Ruff and cumulative diff check pass. All provider calls in tests are mocks. No live fal call or product/runtime adoption has occurred.

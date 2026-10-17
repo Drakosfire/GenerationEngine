@@ -13,7 +13,7 @@ from typing_extensions import runtime_checkable
 
 from generationengine.failures import InferenceFailure
 from generationengine.observation import InferenceObservation
-from generationengine.types import DecisionAnswer, DecisionQuestion, ProviderRoute
+from generationengine.types import DecisionAnswer, DecisionQuestion, ImageOptions, ProviderRoute
 
 
 class TextGenerationCall(BaseModel):
@@ -119,6 +119,7 @@ class ImageProvider(Protocol):
         mask_base64: str | None = None,
         base_image_base64: str | None = None,
         negative_prompt: str | None = None,
+        options: ImageOptions | None = None,
     ) -> list[bytes]:
         """
         Generate images from a prompt.

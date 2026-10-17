@@ -200,3 +200,13 @@ Guarded OpenAI strict-schema execution is supported with caller-selected
 `generate_structured`; a mismatch returns `STRUCTURED_OUTPUT_INVALID` after one
 attempt. `TextRequest.max_conformance_retries` accepts0 or1 (default1 preserves
 the existing unguarded repair behavior). Schema and domain meaning remain caller-owned.
+
+## Explicit image controls
+
+`ImageRequest.options` / `ImageOptions` expose typed quality, background, seed and
+output-format intent. The fal adapter supports model-specific subsets and rejects
+unsupported combinations before submission. GPT Image dimensions with explicit
+controls require exact supported sizes. Returned encoding is detected from bytes;
+actual image dimensions remain unknown rather than copied from the request.
+See the [image contract](CORE-CONTRACT.md#9-image-generation-vs-artifact-persistence).
+No new models, product wizard, artifact storage or live fal witness is included.
