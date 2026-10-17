@@ -142,3 +142,22 @@ def test_options_reject_unknown_or_invalid_parameters():
     ]:
         with pytest.raises(ValidationError):
             ImageOptions(**args)
+
+
+async def test_nano_ultrawide_uses_provider_ratio_spelling():
+    with (
+        patch("generationengine.providers.fal_provider.fal_client") as sdk,
+        patch("generationengine.providers.fal_provider.httpx.AsyncClient") as http,
+    ):
+        sdk.subscribe_async = AsyncMock(
+            return_value={"images": [{"url": "https://fal.media/test.png"}]}
+        )
+        response = MagicMock(content=b"\x89PNG\r\n\x1a\nimage")
+        http.return_value.__aenter__.return_value.get = AsyncMock(return_value=response)
+        client = GenerationClient(image_provider=FalProvider(api_key="synthetic"))
+        await client.generate_image(ImageRequest(
+            prompt="An ultrawide swamp", model="nano-banana-2.1", width=2100, height=900,
+        ))
+        assert sdk.subscribe_async.call_count == 1
+        assert sdk.subscribe_async.call_args.args == ("google/nano-banana-2.1",)
+        assert sdk.subscribe_async.call_args.kwargs["arguments"]["aspect_ratio"] == "21:9"

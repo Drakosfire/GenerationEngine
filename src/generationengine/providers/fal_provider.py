@@ -302,6 +302,9 @@ class FalProvider:
                 }
             elif model == "nano-banana-2.1":
                 ratio = self._size_to_aspect_ratio(size)
+                # fal names this reduced 7:3 ratio 21:9 on the Nano 2.1 route.
+                if ratio == "7:3":
+                    ratio = "21:9"
                 if (
                     ratio
                     not in {
