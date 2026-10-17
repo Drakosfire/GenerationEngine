@@ -67,7 +67,7 @@ class Wire(httpx.AsyncBaseTransport):
                             "content": [
                                 {
                                     "type": "output_text",
-                                    "text": "Supported prose [S1].",
+                                    "text": getattr(self, "text", "Supported prose [S1]."),
                                     "annotations": [],
                                 }
                             ],
@@ -471,3 +471,69 @@ async def test_residual_text_does_not_make_unsuccessful_response_successful(stat
         await engine.aclose()
     assert len(wire.calls) == 1 and wire.closed
     assert [e.outcome for e in events] == ["sending", "response_received"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text,valid", [('{' + '"name":"Néra"' + '}', True), ('{"name":2}', False), ('not json', False)])
+async def test_guarded_strict_schema_one_attempt_and_exact_capture(text, valid):
+    schema = {"type": "object", "properties": {"name": {"type": "string"}},
+              "required": ["name"], "additionalProperties": False}
+    wire, views, events, attempts = Wire(), [], [], []
+    wire.text = text
+    async def authorize(view):
+        views.append(view)
+        return True
+    async def record(event):
+        events.append(event)
+        return True
+    async def completed(event):
+        attempts.append(event)
+    engine = client(wire, authorize, record)
+    try:
+        call = request(json_schema=schema, schema_name="neutral_record", max_conformance_retries=0)
+        if valid:
+            result = await engine.generate_structured(call, on_attempt_completed=completed)
+            assert result.parsed == {"name": "Néra"}
+            assert result.observation.provider_attempt_count == 1
+            assert result.observation.conformance_retry_count == 0
+        else:
+            with pytest.raises(GenerationEngineError) as failure:
+                await engine.generate_structured(call, on_attempt_completed=completed)
+            assert failure.value.failure.code.value == "STRUCTURED_OUTPUT_INVALID"
+            assert failure.value.observation.provider_attempt_count == 1
+            assert failure.value.observation.input_tokens == 20
+            assert failure.value.observation.conformance_retry_count == 0
+    finally:
+        await engine.aclose()
+    assert len(wire.calls) == len(views) == len(attempts) == 1
+    assert attempts[0].text == text
+    assert views[0].body == wire.calls[0].content
+    assert views[0].body_sha256 == hashlib.sha256(wire.calls[0].content).hexdigest()
+    body = json.loads(views[0].body)
+    assert body["text"]["format"] == {"type": "json_schema", "name": "neutral_record", "strict": True, "schema": schema}
+    assert body["tools"] == [] and body["stream"] is False
+    assert [event.outcome for event in events] == ["sending", "response_received"]
+    assert wire.closed
+
+
+@pytest.mark.asyncio
+async def test_guarded_schema_refusal_is_not_repaired_or_misreported_as_empty():
+    class RefusalWire(Wire):
+        async def handle_async_request(self, req):
+            response = await super().handle_async_request(req)
+            body = json.loads(response.content)
+            body["output"][0]["content"] = [{"type": "refusal", "refusal": "Synthetic refusal"}]
+            return httpx.Response(200, json=body, request=req)
+    async def acknowledge(_):
+        return True
+    wire = RefusalWire()
+    engine = client(wire, acknowledge, acknowledge)
+    try:
+        with pytest.raises(GenerationEngineError) as error:
+            await engine.generate_structured(request(json_schema={"type": "object"}, max_conformance_retries=0))
+        assert error.value.failure.code.value == "PROVIDER_REFUSED"
+        assert error.value.observation.input_tokens == 20
+        assert error.value.observation.provider_attempt_count == 1
+    finally:
+        await engine.aclose()
+    assert len(wire.calls) == 1

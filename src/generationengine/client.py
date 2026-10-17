@@ -793,7 +793,7 @@ class GenerationClient:
                 parsed = candidate_from_result(result)
                 validate_against_schema(parsed, schema)
             except ConformanceError as failure:
-                if conformance_retries >= MAX_CONFORMANCE_RETRIES:
+                if conformance_retries >= min(request.max_conformance_retries, MAX_CONFORMANCE_RETRIES):
                     invalid = InferenceFailure.from_code(
                         FailureCode.STRUCTURED_OUTPUT_INVALID,
                         "Structured output did not satisfy the supplied schema.",
@@ -953,6 +953,7 @@ def _text_call(
         json_object=request.json_object,
         json_schema=request.json_schema,
         schema_name=request.schema_name,
+        max_conformance_retries=request.max_conformance_retries,
     )
 
 

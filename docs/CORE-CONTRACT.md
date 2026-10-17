@@ -640,8 +640,11 @@ This bounded mode sends POST `https://api.openai.com/v1/responses` with explicit
 environment base URL. SDK and GE transport retries, redirects and ambient proxy
 routing are disabled. The consumer can inject an HTTP transport for testing but
 cannot combine an injected SDK client with a gate. Default execution is unchanged.
-Streaming and JSON-schema structural repair are rejected before provider I/O;
-ordinary JSON-object text mode remains supported without local repair.
+Streaming and repair-enabled JSON-schema calls are rejected before provider I/O.
+Strict schema calls are supported with explicit `max_conformance_retries=0`;
+`generate_structured` still validates the returned result locally and fails without
+a second request on nonconformance. The actual strict schema is part of the
+authorized/captured SDK envelope. Ordinary JSON-object mode remains supported.
 
 Authorization and lifecycle callbacks must return explicit `True`. Lifecycle
 uses the same meanings as the decision gate: `sending` before underlying

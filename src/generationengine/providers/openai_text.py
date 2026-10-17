@@ -72,7 +72,7 @@ class OpenAITextProvider:
         await self._client.close()
 
     async def generate(self, call: TextGenerationCall) -> TextGenerationResult:
-        if self._guarded and call.json_schema is not None:
+        if self._guarded and call.json_schema is not None and call.max_conformance_retries != 0:
             raise ProviderError.from_code(
                 FailureCode.INVALID_REQUEST,
                 "Guarded text dispatch does not support structural repair.",
@@ -91,6 +91,19 @@ class OpenAITextProvider:
             status = getattr(response, "status", None)
             text = getattr(response, "output_text", None)
             error = getattr(response, "error", None)
+            if status == "completed" and any(
+                getattr(part, "type", None) == "refusal"
+                for item in (getattr(response, "output", None) or [])
+                for part in (getattr(item, "content", None) or [])
+            ):
+                request_id, response_id = _ids_from_response(response)
+                refused = ProviderError.from_code(
+                    FailureCode.PROVIDER_REFUSED, "Provider refused the request.",
+                    provider_request_id=request_id, provider_response_id=response_id,
+                    response_model=getattr(response, "model", None), **_usage_from_response(response),
+                )
+                refused.failure = refused.failure.model_copy(update={"retryability": Retryability.NO})
+                raise refused
             if (
                 status != "completed"
                 or error is not None

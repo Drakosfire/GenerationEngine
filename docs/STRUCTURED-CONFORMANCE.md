@@ -190,3 +190,9 @@ The implementation/test suite proves or should continue to prove:
 ## Guiding rule
 
 > **The product owns what the requested structure means. GenerationEngine owns whether the inference output conforms to that requested structure.**
+
+Guarded OpenAI strict-schema execution is supported with caller-selected
+`max_conformance_retries=0`. Local validation remains mandatory for
+`generate_structured`; a mismatch returns `STRUCTURED_OUTPUT_INVALID` after one
+attempt. `TextRequest.max_conformance_retries` accepts0 or1 (default1 preserves
+the existing unguarded repair behavior). Schema and domain meaning remain caller-owned.

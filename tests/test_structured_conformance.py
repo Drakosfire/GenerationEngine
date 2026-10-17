@@ -708,3 +708,15 @@ async def test_correction_rate_limit_unknown_input_keeps_other_aggregates(
     assert result.observation.response_model == "model"
     assert sleeps == [0.5]
     assert "," not in (result.observation.provider_request_id or "")
+
+
+@pytest.mark.asyncio
+async def test_explicit_zero_conformance_retries_stops_after_first_invalid_response():
+    provider = ScriptedText([_result(text='{"count":"bad"}', parsed={"count": "bad"})])
+    engine = GenerationClient(text_provider=provider)
+    with pytest.raises(GenerationEngineError) as failure:
+        await engine.generate_structured(_request(max_conformance_retries=0))
+    assert failure.value.failure.code is FailureCode.STRUCTURED_OUTPUT_INVALID
+    assert len(provider.calls) == 1
+    assert provider.calls[0].max_conformance_retries == 0
+    assert failure.value.observation.conformance_retry_count == 0
