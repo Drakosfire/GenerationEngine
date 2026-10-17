@@ -1,6 +1,6 @@
 # Image generation controls
 
-Status: ACTIVE — operator requested reusable prompt/model/parameter image generation through GenerationEngine and fal.ai. PRIME owns implementation; independent review before merge.
+Status: MERGED — GE #24 accepted after independent review of 4fb53385a01d561ca0d8cece76799d989e176a66; merge 7e3ed2202684316c6d426462f4928824bb2e99ca. Buddy consumer owns runtime adoption; this implementation lease is complete.
 Base: ea87578058efb39cc521f1b900cb1376a03e0952.
 Branch: codex/image-generation-controls. Topology: independent prerequisite for a later Buddy media wizard; no runtime adoption in this PR.
 
