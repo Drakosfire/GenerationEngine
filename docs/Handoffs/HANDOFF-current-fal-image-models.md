@@ -1,0 +1,7 @@
+# Current fal image models
+
+Status: ACTIVE. Operator requests current general-purpose image choices in Buddy. PRIME implements and ARCHITECTURE reviews. Existing checkout, codex/current-fal-image-models from fetched main c89925ad991e7633b3a6b0445dd69258ec9de8c0. Open GE PRs checked: none. Serial GE prerequisite then Buddy consumer; products own catalog/defaults and saved provenance, GE owns named image execution and fal wire translation. No profile-default changes, silent model substitution, live inference, new checkout/env or runtime mutation in GE slice.
+
+Exact writes: this handoff, src/generationengine/resolver.py, providers/fal_provider.py, tests/test_image_controls.py and docs/CURRENT-STATE.md. Add image-generation-only gpt-image-2.5-flare, gpt-image-2.5-sunburst, nano-banana-2.1. GPT endpoints use image_size width/height object, quality/background/outputformat; Nano uses aspectratio, seed/outputformat and provider default1K. Existingoptions strict; no newly invented controls or editing support. Publicclient→mockSDK wire tests verify exactendpoint and unsupportedcontrols refusal. Existingroutes preserved. Review exacthead beforemerge; Buddy pin/adoption separate.
+
+Schemas checked 2026-10-17: https://fal.ai/models/openai/gpt-image-2.5/flare/text-to-image/api ; https://fal.ai/models/openai/gpt-image-2.5/sunburst/text-to-image/api ; https://fal.ai/models/google/nano-banana-2.1/api . Fal describes Flare as general-purpose default; Buddy chooses it for untuned generation. No universal quality ranking or live quality benchmark claimed.
