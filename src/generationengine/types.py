@@ -85,6 +85,7 @@ class TextRequest(BaseModel):
         default=False,
         description="Request a provider-native JSON object without schema validation or parsing.",
     )
+    max_conformance_retries: int = Field(default=1, strict=True, ge=0, le=1)
     json_schema: dict[str, Any] | None = None
     schema_name: str | None = None
     deadline_ms: int | None = Field(

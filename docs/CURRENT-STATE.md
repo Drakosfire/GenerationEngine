@@ -194,3 +194,9 @@ Built-in OpenAI/OpenRouter adapters close their underlying async SDK clients.
 - provider-specific experimental controls not represented by the generic contract may require a bounded lab-only direct path.
 
 Deleted E2-era facades and cutover details are historical under `docs/archive/`.
+
+Guarded OpenAI strict-schema execution is supported with caller-selected
+`max_conformance_retries=0`. Local validation remains mandatory for
+`generate_structured`; a mismatch returns `STRUCTURED_OUTPUT_INVALID` after one
+attempt. `TextRequest.max_conformance_retries` accepts0 or1 (default1 preserves
+the existing unguarded repair behavior). Schema and domain meaning remain caller-owned.
