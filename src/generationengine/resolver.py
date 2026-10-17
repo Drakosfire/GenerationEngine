@@ -28,6 +28,18 @@ class ResolutionError(Exception):
 
 # Catalog selection keys match current product aliases / provider-native IDs.
 LIVE_MODELS: dict[str, ModelRecord] = {
+    "seedream-v5-pro": ModelRecord(
+        provider="fal",
+        provider_model_id="seedream-v5-pro",
+        capabilities=(Capability.IMAGE,),
+        availability=Availability.AVAILABLE,
+    ),
+    "nano-banana-2-lite": ModelRecord(
+        provider="fal",
+        provider_model_id="nano-banana-2-lite",
+        capabilities=(Capability.IMAGE,),
+        availability=Availability.AVAILABLE,
+    ),
     "gpt-5.1": ModelRecord(
         provider="openai",
         provider_model_id="gpt-5.1",

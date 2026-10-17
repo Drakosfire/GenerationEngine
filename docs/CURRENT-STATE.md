@@ -225,3 +225,11 @@ null for discovery-only entries. Catalog listing never changes resolver authorit
 profile defaults or executable routes. Consumers own curation, pagination and caching.
 HTTP uses fixed fal origin, credentials server-side, 15-second timeout, no redirects
 or retries. Public failures omit provider response bodies and credentials.
+
+Operator-selected adapters also include generation-only `seedream-v5-pro`
+(`bytedance/seedream/v5/pro/text-to-image`, explicit dimensions with 1–4 megapixel
+bounds, aspect ratio at most 16, PNG/JPEG) and `nano-banana-2-lite`
+(`google/nano-banana-2-lite`, documented aspect ratios, seed and PNG/JPEG/WebP).
+Lite does not receive an invented resolution control. No editing or default change.
+Schemas: https://fal.ai/models/bytedance/seedream/v5/pro/text-to-image/api and
+https://fal.ai/models/google/nano-banana-2-lite/api .
