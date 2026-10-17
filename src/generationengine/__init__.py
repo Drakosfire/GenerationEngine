@@ -10,6 +10,8 @@ from generationengine.catalog import (
     InferenceProfile,
     ModelRecord,
     PricingDimension,
+    ProviderCatalogModel,
+    ProviderCatalogPage,
 )
 from generationengine.client import GenerationClient
 from generationengine.failures import FailureCode, InferenceFailure, Retryability
@@ -82,6 +84,8 @@ __all__ = [
     "ModelRecord",
     "ObservationState",
     "PricingDimension",
+    "ProviderCatalogModel",
+    "ProviderCatalogPage",
     "ResolutionError",
     "Retryability",
     "ScoreDecisionAnswer",

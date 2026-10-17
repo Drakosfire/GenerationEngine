@@ -2,7 +2,10 @@
 
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Tuple
+
+from pydantic import ValidationError
 
 try:
     import fal_client
@@ -11,11 +14,24 @@ except ImportError:
 
 import httpx
 
+from generationengine.catalog import ProviderCatalogModel, ProviderCatalogPage
 from generationengine.failures import FailureCode
 from generationengine.providers.errors import ProviderError
 from generationengine.types import ImageOptions
 
 logger = logging.getLogger(__name__)
+
+
+MODEL_ENDPOINTS = {
+    "gpt-image-2.5-flare": "openai/gpt-image-2.5/flare/text-to-image",
+    "gpt-image-2.5-sunburst": "openai/gpt-image-2.5/sunburst/text-to-image",
+    "nano-banana-2.1": "google/nano-banana-2.1",
+    "flux-2-pro": "fal-ai/flux-2-pro",
+    "nano-banana-pro": "fal-ai/nano-banana-pro",
+    "gpt-image-1.5": "fal-ai/gpt-image-1.5",
+    "flux-pro": "fal-ai/flux-pro",
+    "flux-lora-i2i": "fal-ai/flux-lora/image-to-image",
+}
 
 
 class FalProvider:
@@ -39,6 +55,75 @@ class FalProvider:
 
         # Set API key for fal_client
         os.environ["FAL_KEY"] = self.api_key
+
+    async def list_models(
+        self,
+        *,
+        category: str = "text-to-image",
+        cursor: str | None = None,
+        limit: int = 50,
+        endpoint_id: str | None = None,
+        include_schema: bool = False,
+    ) -> ProviderCatalogPage:
+        """Read one catalog page. Callers own pagination, caching and selection."""
+        if not 1 <= limit <= 100 or not category or (cursor is not None and len(cursor) > 4096):
+            raise ProviderError.from_code(FailureCode.INVALID_REQUEST, "Invalid catalog query.")
+        params = {"category": category, "status": "active", "limit": str(limit)}
+        if cursor is not None:
+            params["cursor"] = cursor
+        if endpoint_id is not None:
+            params["endpoint_id"] = endpoint_id
+        if include_schema:
+            params["expand"] = "openapi-3.0"
+        try:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=False) as client:
+                response = await client.get(
+                    "https://api.fal.ai/v1/models",
+                    params=params,
+                    headers={"Authorization": f"Key {self.api_key}"},
+                )
+            if response.status_code in {401, 403}:
+                raise ProviderError.from_code(
+                    FailureCode.CONFIGURATION_UNAVAILABLE, "fal catalog access denied."
+                )
+            if response.status_code == 429:
+                raise ProviderError.from_code(FailureCode.RATE_LIMITED)
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict) or not isinstance(payload.get("models"), list):
+                raise ValueError("catalog envelope")
+            models = []
+            aliases = {value: key for key, value in MODEL_ENDPOINTS.items()}
+            for item in payload["models"]:
+                record = ProviderCatalogModel.model_validate(item)
+                # Account preference flags are not public model capabilities.
+                record.metadata = {
+                    k: v for k, v in record.metadata.items() if k not in {"is_favorited", "pinned"}
+                }
+                record.executable_model = aliases.get(record.endpoint_id)
+                models.append(record)
+            if type(payload.get("has_more")) is not bool:
+                raise ValueError("catalog pagination")
+            cursor_value = payload.get("next_cursor")
+            if cursor_value is not None and not isinstance(cursor_value, str):
+                raise ValueError("catalog cursor")
+            if payload["has_more"] and not cursor_value:
+                raise ValueError("missing catalog cursor")
+            return ProviderCatalogPage(
+                provider="fal",
+                models=models,
+                next_cursor=cursor_value,
+                has_more=payload["has_more"],
+                fetched_at=datetime.now(timezone.utc),
+            )
+        except httpx.TimeoutException as exc:
+            raise ProviderError.from_code(FailureCode.PROVIDER_TIMEOUT) from exc
+        except httpx.HTTPError as exc:
+            raise ProviderError.from_code(FailureCode.PROVIDER_UNAVAILABLE) from exc
+        except (ValueError, TypeError, ValidationError) as exc:
+            raise ProviderError.from_code(
+                FailureCode.MALFORMED_PROVIDER_RESPONSE, "fal returned an invalid catalog page."
+            ) from exc
 
     def _size_to_aspect_ratio(self, size: Tuple[int, int]) -> str:
         """
@@ -136,15 +221,6 @@ class FalProvider:
             RetryableError: For retryable failures (timeouts, rate limits)
             Exception: For non-retryable failures
         """
-        # Map model names to Fal endpoints (text-to-image)
-        model_endpoints = {
-            "flux-2-pro": "fal-ai/flux-2-pro",
-            "nano-banana-pro": "fal-ai/nano-banana-pro",
-            "gpt-image-1.5": "fal-ai/gpt-image-1.5",
-            "flux-pro": "fal-ai/flux-pro",
-            "flux-lora-i2i": "fal-ai/flux-lora/image-to-image",
-        }
-
         # Map model names to edit endpoints (inpainting)
         edit_endpoints = {
             "flux-2-pro": "fal-ai/flux-2-pro/edit",
@@ -152,7 +228,7 @@ class FalProvider:
             "gpt-image-1.5": "fal-ai/gpt-image-1.5/edit",
         }
 
-        endpoint = model_endpoints.get(model)
+        endpoint = MODEL_ENDPOINTS.get(model)
         if not endpoint:
             raise ValueError(f"Unsupported Fal model: {model}")
 
@@ -205,8 +281,61 @@ class FalProvider:
                 if negative_prompt:
                     arguments["negative_prompt"] = negative_prompt
         else:
-            # Text-to-image generation
-            if model == "gpt-image-1.5":
+            # Current endpoints use their documented size/aspect-ratio schemas.
+            if model in {"gpt-image-2.5-flare", "gpt-image-2.5-sunburst"}:
+                if (
+                    any(type(n) is not int or n <= 0 or n % 16 for n in size)
+                    or max(size) > 3840
+                    or max(size) / min(size) > 3
+                    or not 655360 <= size[0] * size[1] <= 8294400
+                ):
+                    raise ProviderError.from_code(
+                        FailureCode.INVALID_REQUEST, "Unsupported GPT image dimensions."
+                    )
+                arguments = {
+                    "prompt": prompt,
+                    "num_images": num_images,
+                    "image_size": {"width": size[0], "height": size[1]},
+                    "quality": "high",
+                    "background": "auto",
+                    "output_format": "png",
+                }
+            elif model == "nano-banana-2.1":
+                ratio = self._size_to_aspect_ratio(size)
+                # fal names this reduced 7:3 ratio 21:9 on the Nano 2.1 route.
+                if ratio == "7:3":
+                    ratio = "21:9"
+                if (
+                    ratio
+                    not in {
+                        "1:1",
+                        "3:2",
+                        "2:3",
+                        "4:3",
+                        "3:4",
+                        "16:9",
+                        "9:16",
+                        "21:9",
+                        "5:4",
+                        "4:5",
+                        "4:1",
+                        "1:4",
+                        "8:1",
+                        "1:8",
+                    }
+                    or num_images > 4
+                ):
+                    raise ProviderError.from_code(
+                        FailureCode.INVALID_REQUEST, "Unsupported Nano Banana shape or image count."
+                    )
+                arguments = {
+                    "prompt": prompt,
+                    "num_images": num_images,
+                    "aspect_ratio": ratio,
+                    "resolution": "1K",
+                    "output_format": "png",
+                }
+            elif model == "gpt-image-1.5":
                 size_str = self._size_to_gpt_image_size(size)
                 arguments = {
                     "prompt": prompt,
@@ -245,6 +374,9 @@ class FalProvider:
             explicit = options.model_dump(exclude_none=True)
             supported = {
                 "gpt-image-1.5": {"quality", "background", "output_format"},
+                "gpt-image-2.5-flare": {"quality", "background", "output_format"},
+                "gpt-image-2.5-sunburst": {"quality", "background", "output_format"},
+                "nano-banana-2.1": {"seed", "output_format"},
                 "flux-2-pro": {"seed", "output_format"},
             }.get(model, set())
             if set(explicit) - supported or (
@@ -255,7 +387,9 @@ class FalProvider:
                     "Selected image controls are unsupported by this model.",
                 )
             if model == "gpt-image-1.5" and size not in {
-                (1024, 1024), (1536, 1024), (1024, 1536),
+                (1024, 1024),
+                (1536, 1024),
+                (1024, 1536),
             }:
                 raise ProviderError.from_code(
                     FailureCode.INVALID_REQUEST,
@@ -286,7 +420,9 @@ class FalProvider:
 
         # Log negative prompt if present
         if negative_prompt:
-            logger.info(f"🚫 [FalProvider] Negative prompt: {negative_prompt[:100]}{'...' if len(negative_prompt) > 100 else ''}")
+            logger.info(
+                f"🚫 [FalProvider] Negative prompt: {negative_prompt[:100]}{'...' if len(negative_prompt) > 100 else ''}"
+            )
 
         try:
             # Use subscribe_async for non-blocking async operation
@@ -313,7 +449,9 @@ class FalProvider:
 
             if len(images) < num_images:
                 # Partial success - still return what we got
-                logger.warning(f"⚠️ [FalProvider] Partial success: got {len(images)}/{num_images} images")
+                logger.warning(
+                    f"⚠️ [FalProvider] Partial success: got {len(images)}/{num_images} images"
+                )
 
             logger.info(f"✅ [FalProvider] Generation complete: {len(images)} images downloaded")
             return images
@@ -338,4 +476,3 @@ class FalProvider:
                 FailureCode.PROVIDER_ERROR,
                 f"Fal.ai generation failed: {e}",
             ) from e
-

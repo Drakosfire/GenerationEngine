@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
-from generationengine.catalog import Capability
+from generationengine.catalog import Capability, ProviderCatalogPage
 from generationengine.conformance import (
     ConformanceError,
     candidate_from_result,
@@ -181,6 +181,43 @@ class GenerationClient:
                     provider="fal",
                 ) from exc
         return self._image
+
+    async def list_image_models(
+        self,
+        *,
+        category: str = "text-to-image",
+        cursor: str | None = None,
+        limit: int = 50,
+        endpoint_id: str | None = None,
+        include_schema: bool = False,
+    ) -> ProviderCatalogPage:
+        """Discover one provider catalog page without generating or selecting a model."""
+        if self._closed:
+            raise _config_error(
+                InferenceFailure.from_code(
+                    FailureCode.CONFIGURATION_UNAVAILABLE, "GenerationClient is closed."
+                ),
+                provider="fal",
+            )
+        provider = self._image_provider()
+        discover = getattr(provider, "list_models", None)
+        if not callable(discover):
+            raise _config_error(
+                InferenceFailure.from_code(
+                    FailureCode.UNSUPPORTED_CAPABILITY, "Image provider has no catalog discovery."
+                ),
+                provider="fal",
+            )
+        try:
+            return await discover(
+                category=category,
+                cursor=cursor,
+                limit=limit,
+                endpoint_id=endpoint_id,
+                include_schema=include_schema,
+            )
+        except ProviderError as exc:
+            raise _config_error(exc.failure, provider="fal") from exc
 
     def _decision_provider_for(self, provider_id: str, request: DecisionRequest) -> None:
         key = provider_id.strip().lower()

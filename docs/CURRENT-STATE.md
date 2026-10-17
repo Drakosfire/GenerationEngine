@@ -210,3 +210,18 @@ controls require exact supported sizes. Returned encoding is detected from bytes
 actual image dimensions remain unknown rather than copied from the request.
 See the [image contract](CORE-CONTRACT.md#9-image-generation-vs-artifact-persistence).
 No new models, product wizard, artifact storage or live fal witness is included.
+
+## Current fal image endpoints
+
+Named generation-only models: `gpt-image-2.5-flare`, `gpt-image-2.5-sunburst`, and `nano-banana-2.1`. GPT2.5 uses explicit pixel sizes and existing quality/background/format controls; Nano2.1 uses aspect ratio, provider-default1K resolution and seed/format. These entries do not advertise image editing. Product catalogs/defaults remain caller-owned; no profile defaults change.
+
+### Read-only image model discovery
+
+`GenerationClient.list_image_models(category="text-to-image", cursor=None, limit=50,
+endpoint_id=None, include_schema=False)` reads one fal catalog page. It returns
+provider metadata, UTC fetch time, pagination and optional provider OpenAPI (including
+expansion errors). `executable_model` identifies an existing GE adapter alias, or is
+null for discovery-only entries. Catalog listing never changes resolver authority,
+profile defaults or executable routes. Consumers own curation, pagination and caching.
+HTTP uses fixed fal origin, credentials server-side, 15-second timeout, no redirects
+or retries. Public failures omit provider response bodies and credentials.

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -69,3 +71,20 @@ class ModelRecord(BaseModel):
 def profile_contains_product_vocabulary(name: str) -> bool:
     lowered = name.lower()
     return any(stem in lowered for stem in FORBIDDEN_PROFILE_VOCABULARY)
+
+
+class ProviderCatalogModel(BaseModel):
+    """Provider discovery, not a recommendation or a new execution route."""
+
+    endpoint_id: str = Field(min_length=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    executable_model: str | None = None
+    openapi: dict[str, Any] | None = None
+
+
+class ProviderCatalogPage(BaseModel):
+    provider: str
+    models: list[ProviderCatalogModel]
+    next_cursor: str | None = None
+    has_more: bool
+    fetched_at: datetime

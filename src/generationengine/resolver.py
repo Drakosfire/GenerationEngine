@@ -25,6 +25,7 @@ class ResolutionError(Exception):
         super().__init__(failure.message)
         self.failure = failure
 
+
 # Catalog selection keys match current product aliases / provider-native IDs.
 LIVE_MODELS: dict[str, ModelRecord] = {
     "gpt-5.1": ModelRecord(
@@ -51,6 +52,24 @@ LIVE_MODELS: dict[str, ModelRecord] = {
         provider="openai",
         provider_model_id="gpt-5.6-luna",
         capabilities=(Capability.STRUCTURED_TEXT, Capability.TEXT),
+        availability=Availability.AVAILABLE,
+    ),
+    "gpt-image-2.5-flare": ModelRecord(
+        provider="fal",
+        provider_model_id="gpt-image-2.5-flare",
+        capabilities=(Capability.IMAGE,),
+        availability=Availability.AVAILABLE,
+    ),
+    "gpt-image-2.5-sunburst": ModelRecord(
+        provider="fal",
+        provider_model_id="gpt-image-2.5-sunburst",
+        capabilities=(Capability.IMAGE,),
+        availability=Availability.AVAILABLE,
+    ),
+    "nano-banana-2.1": ModelRecord(
+        provider="fal",
+        provider_model_id="nano-banana-2.1",
+        capabilities=(Capability.IMAGE,),
         availability=Availability.AVAILABLE,
     ),
     "flux-2-pro": ModelRecord(
