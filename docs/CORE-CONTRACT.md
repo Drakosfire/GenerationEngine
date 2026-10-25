@@ -457,7 +457,21 @@ TextCompleted(final_text, observation)
 TextFailed(failure, observation)
 ```
 
-Every stream must end with exactly one terminal event: `TextCompleted` or `TextFailed`. Partial deltas remain valid when a stream ends in `TextFailed`.
+Every fully consumed stream ends with exactly one terminal event: `TextCompleted`
+or `TextFailed`. Previously yielded deltas remain available after failure, but are
+provisional output, not a successful or publishable artifact. Early consumer close
+or task cancellation guarantees cleanup, not delivery to a retired consumer.
+
+For schema-bearing `stream_text`, callers must set `max_conformance_retries=0`.
+Invalid schemas and repair-enabled requests fail before provider construction/IO.
+OpenAI forwards the native strict schema, including its name, in the streaming
+request. Regardless of provider, GE parses and validates complete final text against
+its captured caller schema before yielding `TextCompleted`; a mismatch yields
+`STRUCTURED_OUTPUT_INVALID`, preserving reported usage/IDs without repair or a
+second request. Deltas have no conformance guarantee. The existing text terminal
+carries final text, not a parsed result. Products retain domain/evidence validation
+and publication ownership. Caller mutation after progress begins cannot retarget
+this operation's captured schema. Schema-less stream behavior is unchanged.
 
 `stream_text()` consumes the same overall `deadline_ms` budget as non-streaming calls. It does **not** retry after output has begun. Construction/config failures, provider exceptions, overall-budget timeouts, and duplicate provider terminals are all normalized to that single public terminal:
 
@@ -649,17 +663,19 @@ be combined with a dispatch gate. Unguarded provider behavior is unchanged.
 
 `generationengine.text_dispatch` supplies `TextDispatchGate`,
 `PreparedTextDispatch` and `TextDispatchEvent`. The OpenAI text adapter accepts
-`dispatch_gate=...` for ordinary, nonstreaming Responses calls. The actual SDK
+`dispatch_gate=...` for ordinary nonstreaming and streaming Responses calls. The actual SDK
 serializes the body before consumer authorization. Immutable bytes, SHA-256,
 size, UUID attempt ID, provider, API mode, model, method and exact destination
 are exposed; authentication headers are not. Body bytes may contain caller data.
 
 This bounded mode sends POST `https://api.openai.com/v1/responses` with explicit
-`tools=[]` and `stream=false`. It pins that destination instead of inheriting an
+`tools=[]` and an explicit boolean `stream` (`false` for ordinary calls, `true`
+for streaming). It pins that destination instead of inheriting an
 environment base URL. SDK and GE transport retries, redirects and ambient proxy
 routing are disabled. The consumer can inject an HTTP transport for testing but
 cannot combine an injected SDK client with a gate. Default execution is unchanged.
-Streaming and repair-enabled JSON-schema calls are rejected before provider I/O.
+Repair-enabled JSON-schema calls and JSON-object streaming are rejected before
+provider I/O.
 Strict schema calls are supported with explicit `max_conformance_retries=0`;
 `generate_structured` still validates the returned result locally and fails without
 a second request on nonconformance. The actual strict schema is part of the
@@ -678,6 +694,16 @@ response error, and nonblank output text. An HTTP200 response with failed,
 nonterminal, missing or unknown status cannot become a successful text result,
 even when it contains residual valid text. Failure observations preserve safe
 provider IDs/model and reported usage, without residual text or raw error detail.
+Guarded streaming uses the same exact-byte authorization and header lifecycle.
+Only a genuine `response.completed` event with completed status, no error/refusal
+and nonblank final text can succeed. Failed/incomplete/cancelled events, unknown
+status, missing terminal, malformed SSE/body and body transport errors cannot
+promote earlier deltas to success. Missing terminal uses `STREAM_INCOMPLETE`;
+provider-declared incomplete uses `PROVIDER_INCOMPLETE`. Safe IDs/model and reported
+usage remain available when known, including the HTTP request ID after headers.
+An SDK-wrapped typed gate denial remains an evidence-persistence failure. Header
+acknowledgment is not undone by body failure. Response streams close on terminal,
+early close, timeout, cancellation and parsing/callback failure. No stream retry.
 Closing the provider closes its owned SDK client and injected HTTP transport.
 
 The supported OpenAI SDK `http_client` injection and `max_retries=0` are documented

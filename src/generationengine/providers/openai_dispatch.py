@@ -52,7 +52,7 @@ class GuardedOpenAITransport(httpx.AsyncBaseTransport):
                 request.method != "POST"
                 or str(request.url) != _ENDPOINT
                 or request.headers.get("content-encoding")
-                or payload.get("stream") is not False
+                or type(payload.get("stream")) is not bool
                 or payload.get("tools") != []
                 or not isinstance(model, str)
                 or not model
