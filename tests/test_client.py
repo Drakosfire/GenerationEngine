@@ -1284,10 +1284,17 @@ async def test_schema_stream_validation_consumes_the_overall_deadline(monkeypatc
         time.sleep(0.03)  # Synchronous conformance work consumes the same budget.
 
     monkeypatch.setattr(execution, "validate_against_schema", slow_validate)
-    obs = InferenceObservation(provider="openai", latency_ms=0, retry_count=0, state=ObservationState.COMPLETED)
+    obs = InferenceObservation(provider="openai", latency_ms=0, retry_count=0,
+        state=ObservationState.COMPLETED, provider_request_id="req-validation",
+        provider_response_id="resp-validation", response_model="synthetic",
+        input_tokens=20, output_tokens=8, cached_input_tokens=0, reasoning_tokens=2)
     provider = FakeTextProvider(stream_events=[TextCompleted(final_text='{"value":"ok"}', observation=obs)])
     stream = GenerationClient(text_provider=provider).stream_text(TextRequest(user_prompt="hi",
         provider="openai", model="synthetic", json_schema={"type":"object"},
         max_conformance_retries=0, deadline_ms=10))
     events = [e async for e in stream]
     assert len(events) == 1 and events[0].failure.code is FailureCode.PROVIDER_TIMEOUT
+    reported = events[0].observation
+    assert (reported.provider_request_id, reported.provider_response_id) == ("req-validation", "resp-validation")
+    assert (reported.input_tokens, reported.output_tokens, reported.cached_input_tokens, reported.reasoning_tokens) == (20, 8, 0, 2)
+    assert reported.provider_attempt_count == 1

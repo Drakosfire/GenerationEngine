@@ -521,7 +521,15 @@ class GenerationClient:
                                 }),
                             )
                     if _remaining_s(started, deadline_s) <= 0:
-                        raise TimeoutError()
+                        failure = InferenceFailure.from_code(FailureCode.PROVIDER_TIMEOUT)
+                        event = TextFailed(
+                            failure=failure,
+                            observation=event.observation.model_copy(update={
+                                "state": ObservationState.FAILED,
+                                "failure_code": failure.code,
+                                "provider_attempt_count": 1,
+                            }),
+                        )
                     terminal = True
                     yield _public_stream_terminal(
                         event,

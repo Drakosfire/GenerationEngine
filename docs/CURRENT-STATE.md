@@ -107,7 +107,9 @@ are distinct from response-body parsing. Guarded text success requires SDK statu
 completed, no response error and nonblank text; residual output from failed or
 nonterminal responses fails without retry and retains safe IDs/model/usage.
 Structural-repair requests and JSON-object streaming are rejected on a guarded
-provider. Strict-schema streaming is supported with `max_conformance_retries=0`. Existing unguarded execution is unchanged.
+provider. Strict-schema streaming is supported with `max_conformance_retries=0`.
+Unguarded provider terminal interpretation is unchanged; schema-bearing streaming
+now preserves the requested schema and validates final output as described below.
 Synthetic real-SDK/mock-HTTP tests prove the boundary; live provider and product
 adoption remain separate. See [text dispatch contract](CORE-CONTRACT.md#opt-in-text-dispatch-authorization).
 
