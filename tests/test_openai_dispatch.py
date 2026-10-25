@@ -222,10 +222,11 @@ async def test_transport_failure_or_response_never_retries_or_redirects(outcome)
 @pytest.mark.asyncio
 @pytest.mark.parametrize("phase", ["authorize", "sending"])
 @pytest.mark.parametrize("mutation", ["method", "url", "stream", "headers"])
-async def test_callbacks_cannot_mutate_prepared_request(phase, mutation):
+@pytest.mark.parametrize("stream_mode", [False, True])
+async def test_callbacks_cannot_mutate_prepared_request(phase, mutation, stream_mode):
     wire, events = Wire(), []
     req = httpx.Request(
-        "POST", ENDPOINT, json={"model": "writer-test", "tools": [], "stream": False}
+        "POST", ENDPOINT, json={"model": "writer-test", "tools": [], "stream": stream_mode}
     )
 
     def mutate():
@@ -275,7 +276,7 @@ async def test_unsupported_request_refuses_before_authorization(change):
     elif change == "tools":
         body["tools"] = [{"type": "web_search"}]
     elif change == "stream":
-        body["stream"] = True
+        body["stream"] = "true"
     elif change == "compression":
         headers["content-encoding"] = "gzip"
     elif change == "model":
@@ -343,7 +344,7 @@ async def test_concurrent_requests_have_independent_ids_and_owned_cleanup():
 
 
 @pytest.mark.asyncio
-async def test_guarded_stream_and_structured_repair_refuse_without_io():
+async def test_guarded_stream_repair_and_structured_repair_refuse_without_io():
     wire = Wire()
 
     async def unexpected(_):
@@ -355,7 +356,9 @@ async def test_guarded_stream_and_structured_repair_refuse_without_io():
     try:
         events = [
             e
-            async for e in provider.stream(TextGenerationCall(model="writer-test", user_prompt="x"))
+            async for e in provider.stream(TextGenerationCall(
+                model="writer-test", user_prompt="x", json_schema={"type": "object"}
+            ))
         ]
         assert len(events) == 1 and events[0].failure.code.value == "INVALID_REQUEST"
         with pytest.raises(ProviderError):
@@ -537,3 +540,303 @@ async def test_guarded_schema_refusal_is_not_repaired_or_misreported_as_empty():
     finally:
         await engine.aclose()
     assert len(wire.calls) == 1
+
+
+# Raw official-SDK SSE over a synthetic HTTP transport. No provider access.
+SCHEMA = {"type": "object", "properties": {"value": {"type": "string"}},
+          "required": ["value"], "additionalProperties": False}
+
+
+def stream_request(**changes):
+    fields = dict(provider="openai", model="writer-test", user_prompt="synthetic",
+                  temperature=None, max_transport_retries=0, max_conformance_retries=0,
+                  json_schema=SCHEMA, schema_name="stream_value")
+    fields.update(changes)
+    return TextRequest(**fields)
+
+
+def response_payload(text='{"value":"雪"}', **changes):
+    result = dict(id="resp_stream", object="response", created_at=1, status="completed",
+                  model="writer-test", output=[dict(type="message", id="msg_stream",
+                  role="assistant", status="completed", content=[dict(type="output_text",
+                  text=text, annotations=[])])],
+                  usage=dict(input_tokens=20, input_tokens_details=dict(cached_tokens=0),
+                             output_tokens=8, output_tokens_details=dict(reasoning_tokens=2),
+                             total_tokens=28))
+    result.update(changes)
+    return result
+
+
+def stream_events(text='{"value":"雪"}', terminal="response.completed", **response_changes):
+    return [dict(type="response.created", sequence_number=0,
+                 response=response_payload(output=[], status="in_progress", usage=None)),
+            dict(type="response.output_text.delta", sequence_number=1, item_id="msg_stream",
+                 output_index=0, content_index=0, delta=text[:5]),
+            dict(type="response.output_text.delta", sequence_number=2, item_id="msg_stream",
+                 output_index=0, content_index=0, delta=text[5:]),
+            dict(type=terminal, sequence_number=3,
+                 response=response_payload(text, **response_changes))]
+
+
+class SSEBody(httpx.AsyncByteStream):
+    def __init__(self, events, *, pause=False, broken=False):
+        self.events = events
+        self.pause = pause
+        self.broken = broken
+        self.closed = False
+        self.waiting = asyncio.Event()
+
+    async def __aiter__(self):
+        for event in self.events:
+            if isinstance(event, bytes):
+                yield event
+            else:
+                yield ("data: " + json.dumps(event) + "\n\n").encode()
+        if self.broken:
+            raise httpx.ReadError(SECRET)
+        if self.pause:
+            self.waiting.set()
+            await asyncio.Event().wait()
+
+    async def aclose(self):
+        self.closed = True
+
+
+class SSEWire(httpx.AsyncBaseTransport):
+    def __init__(self, body):
+        self.body = body
+        self.calls = []
+        self.closed = False
+
+    async def handle_async_request(self, req):
+        self.calls.append(req)
+        return httpx.Response(200, stream=self.body, request=req,
+                              headers={"content-type": "text/event-stream",
+                                       "x-request-id": "req_stream"})
+
+    async def aclose(self):
+        self.closed = True
+
+
+async def capture_stream(wire, **changes):
+    views, lifecycle = [], []
+
+    async def authorize(view):
+        views.append(view)
+        return True
+
+    async def record(event):
+        lifecycle.append(event)
+        return True
+
+    engine = client(wire, authorize, record)
+    try:
+        events = [event async for event in engine.stream_text(stream_request(**changes))]
+    finally:
+        await engine.aclose()
+    return events, views, lifecycle
+
+
+@pytest.mark.asyncio
+async def test_guarded_schema_stream_exact_sdk_bytes_and_real_deltas(monkeypatch):
+    from generationengine import TextCompleted, TextDelta
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://example.invalid/ignored")
+    body = SSEBody(stream_events())
+    wire = SSEWire(body)
+    events, views, lifecycle = await capture_stream(wire)
+    assert len(wire.calls) == len(views) == 1
+    sent = wire.calls[0]
+    prepared = views[0]
+    assert prepared.body == sent.content
+    assert prepared.body_sha256 == hashlib.sha256(sent.content).hexdigest()
+    assert prepared.body_size == len(sent.content)
+    envelope = json.loads(sent.content)
+    assert envelope["stream"] is True and envelope["tools"] == []
+    assert envelope["text"]["format"] == dict(
+        type="json_schema", name="stream_value", schema=SCHEMA, strict=True)
+    assert str(sent.url) == ENDPOINT
+    assert [e.outcome for e in lifecycle] == ["sending", "response_received"]
+    assert lifecycle[-1].http_status == 200
+    assert [e.text for e in events if isinstance(e, TextDelta)] == ['{"val', 'ue":"雪"}']
+    assert isinstance(events[-1], TextCompleted)
+    assert events[-1].final_text == '{"value":"雪"}'
+    obs = events[-1].observation
+    assert (obs.provider_request_id, obs.provider_response_id) == ("req_stream", "resp_stream")
+    assert (obs.input_tokens, obs.cached_input_tokens, obs.output_tokens, obs.reasoning_tokens) == (20, 0, 8, 2)
+    assert (obs.provider_attempt_count, obs.transport_retry_count, obs.conformance_retry_count) == (1, 0, 0)
+    assert body.closed and wire.closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal,changes,code", [
+    ("response.failed", {"status": "failed"}, "PROVIDER_ERROR"),
+    ("response.incomplete", {"status": "incomplete"}, "PROVIDER_INCOMPLETE"),
+    ("response.cancelled", {"status": "cancelled"}, "PROVIDER_INCOMPLETE"),
+    ("response.completed", {"status": "incomplete"}, "PROVIDER_INCOMPLETE"),
+    ("response.completed", {"status": "unknown"}, "PROVIDER_INCOMPLETE"),
+    ("response.completed", {"status": None}, "PROVIDER_INCOMPLETE"),
+    ("response.completed", {"status": "failed", "error": {"code": "server_error", "message": SECRET}}, "PROVIDER_ERROR"),
+    ("response.completed", {"output": []}, "PROVIDER_INCOMPLETE"),
+])
+async def test_guarded_stream_partial_valid_json_never_overrides_bad_terminal(terminal, changes, code):
+    from generationengine import TextFailed
+    wire = SSEWire(SSEBody(stream_events(terminal=terminal, **changes)))
+    events, _, lifecycle = await capture_stream(wire)
+    assert isinstance(events[-1], TextFailed)
+    assert events[-1].failure.code.value == code
+    assert events[-1].observation.provider_response_id == "resp_stream"
+    assert events[-1].observation.input_tokens == 20
+    assert SECRET not in events[-1].model_dump_json()
+    assert len(wire.calls) == 1
+    assert [e.outcome for e in lifecycle] == ["sending", "response_received"]
+    assert wire.body.closed
+
+
+@pytest.mark.asyncio
+async def test_guarded_stream_terminal_refusal_preserves_usage_and_no_refusal_text():
+    from generationengine import TextFailed
+    refused = [dict(type="message", id="msg_stream", role="assistant", status="completed",
+                    content=[dict(type="refusal", refusal=SECRET)])]
+    wire = SSEWire(SSEBody(stream_events(output=refused)))
+    events, _, _ = await capture_stream(wire)
+    assert isinstance(events[-1], TextFailed)
+    assert events[-1].failure.code.value == "PROVIDER_REFUSED"
+    assert events[-1].observation.reasoning_tokens == 2
+    assert SECRET not in events[-1].model_dump_json()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("broken,malformed", [(False, False), (True, False), (False, True)])
+async def test_guarded_stream_body_failure_and_missing_terminal_keep_header_ack(broken, malformed):
+    from generationengine import TextFailed
+    raw = stream_events()[:-1]
+    if malformed:
+        raw.append(b'data: {not json\n\n')
+    wire = SSEWire(SSEBody(raw, broken=broken))
+    events, _, lifecycle = await capture_stream(wire)
+    assert isinstance(events[-1], TextFailed)
+    if not broken and not malformed:
+        assert events[-1].failure.code.value == "STREAM_INCOMPLETE"
+    assert events[-1].observation.provider_request_id == "req_stream"
+    assert events[-1].observation.provider_response_id == "resp_stream"
+    assert events[-1].observation.input_tokens is None
+    assert [e.outcome for e in lifecycle] == ["sending", "response_received"]
+    assert SECRET not in events[-1].model_dump_json()
+    assert len(wire.calls) == 1 and wire.body.closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["deny", "sending", "response_received"])
+async def test_guarded_stream_denied_callbacks_do_not_reissue(outcome):
+    from generationengine import TextFailed
+    wire = SSEWire(SSEBody(stream_events()))
+    seen = []
+
+    async def authorize(_):
+        return outcome != "deny"
+
+    async def record(e):
+        seen.append(e.outcome)
+        return e.outcome != outcome
+
+    engine = client(wire, authorize, record)
+    try:
+        events = [e async for e in engine.stream_text(stream_request())]
+    finally:
+        await engine.aclose()
+    assert isinstance(events[-1], TextFailed)
+    assert events[-1].failure.code.value == "ATTEMPT_EVIDENCE_PERSISTENCE_FAILED"
+    assert len(wire.calls) == (1 if outcome == "response_received" else 0)
+    assert seen == (["sending", "response_received"] if outcome == "response_received" else
+                    ["sending", "known_not_sent"] if outcome == "sending" else ["known_not_sent"])
+    if wire.calls:
+        assert wire.body.closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("finish", ["early_close", "cancel", "timeout"])
+async def test_guarded_stream_closes_live_body_on_retirement(finish):
+    from generationengine import TextFailed
+    body = SSEBody(stream_events()[:-1], pause=True)
+    wire = SSEWire(body)
+    seen = []
+
+    async def authorize(_):
+        return True
+
+    async def record(e):
+        seen.append(e.outcome)
+        return True
+
+    engine = client(wire, authorize, record)
+    stream = engine.stream_text(stream_request(deadline_ms=50 if finish == "timeout" else None))
+    try:
+        await anext(stream)
+        if finish == "early_close":
+            await stream.aclose()
+        elif finish == "cancel":
+            await anext(stream)
+            task = asyncio.create_task(anext(stream))
+            await asyncio.wait_for(body.waiting.wait(), 1)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        else:
+            rest = [e async for e in stream]
+            assert isinstance(rest[-1], TextFailed)
+            assert rest[-1].failure.code.value == "PROVIDER_TIMEOUT"
+        assert body.closed
+        assert seen == ["sending", "response_received"]
+        assert len(wire.calls) == 1
+    finally:
+        await stream.aclose()
+        await engine.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ['{"value":2}', 'not JSON'])
+async def test_real_guarded_stream_final_schema_failure_does_not_repair(text):
+    from generationengine import TextFailed
+    wire = SSEWire(SSEBody(stream_events(text)))
+    events, _, lifecycle = await capture_stream(wire)
+    assert isinstance(events[-1], TextFailed)
+    assert events[-1].failure.code.value == "STRUCTURED_OUTPUT_INVALID"
+    assert events[-1].observation.input_tokens == 20
+    assert events[-1].observation.provider_response_id == "resp_stream"
+    assert len(wire.calls) == 1 and len(lifecycle) == 2
+    assert wire.body.closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["timeout", "cancel"])
+async def test_guarded_stream_transport_failure_before_headers_is_uncertain(outcome):
+    class BrokenWire(SSEWire):
+        async def handle_async_request(self, req):
+            self.calls.append(req)
+            if outcome == "cancel":
+                raise asyncio.CancelledError()
+            raise httpx.ReadTimeout(SECRET, request=req)
+
+    wire = BrokenWire(SSEBody([]))
+    seen = []
+
+    async def authorize(_):
+        return True
+
+    async def record(e):
+        seen.append(e.outcome)
+        return True
+
+    engine = client(wire, authorize, record)
+    try:
+        if outcome == "cancel":
+            with pytest.raises(asyncio.CancelledError):
+                _ = [e async for e in engine.stream_text(stream_request())]
+        else:
+            events = [e async for e in engine.stream_text(stream_request())]
+            assert events[-1].failure.code.value == "PROVIDER_TIMEOUT"
+            assert SECRET not in events[-1].model_dump_json()
+        assert len(wire.calls) == 1
+        assert seen == ["sending", "outcome_unknown"]
+    finally:
+        await engine.aclose()

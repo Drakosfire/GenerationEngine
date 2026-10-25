@@ -399,7 +399,10 @@ class GenerationClient:
         return DecisionResult(answers=result.answers, observation=observation)
 
     async def stream_text(self, request: TextRequest) -> AsyncIterator[TextStreamEvent]:
-        """Yield deltas, then exactly one terminal. Streaming does not retry."""
+        """Yield provisional deltas and one terminal; schema finals validate without repair."""
+        # A caller editing its request while consuming deltas cannot retarget the
+        # final validator away from the schema used for this provider dispatch.
+        request = request.model_copy(deep=True)
         started = time.monotonic()
         if self._closed:
             yield _stream_failure(
@@ -433,6 +436,19 @@ class GenerationClient:
                 provider_attempt_count=0,
             )
             return
+        if request.json_schema is not None:
+            try:
+                if request.max_conformance_retries != 0:
+                    raise ConformanceError("Streaming cannot repair output")
+                check_schema(request.json_schema)
+            except ConformanceError:
+                yield _stream_failure(
+                    failure=InferenceFailure.from_code(
+                        FailureCode.INVALID_REQUEST, "Schema streaming requires a valid schema and no repair."
+                    ),
+                    request=request, started=started, provider_attempt_count=0,
+                )
+                return
         deadline_s = _deadline_s(request.deadline_ms)
         resolution = None
         try:
@@ -488,6 +504,32 @@ class GenerationClient:
                 if isinstance(event, (TextCompleted, TextFailed)):
                     if terminal:
                         continue
+                    if isinstance(event, TextCompleted) and request.json_schema is not None:
+                        try:
+                            candidate = candidate_from_result(TextGenerationResult(text=event.final_text))
+                            validate_against_schema(candidate, request.json_schema)
+                        except ConformanceError:
+                            failure = InferenceFailure.from_code(
+                                FailureCode.STRUCTURED_OUTPUT_INVALID, "Stream output did not satisfy the required schema."
+                            )
+                            event = TextFailed(
+                                failure=failure,
+                                observation=event.observation.model_copy(update={
+                                    "state": ObservationState.FAILED,
+                                    "failure_code": failure.code,
+                                    "provider_attempt_count": 1,
+                                }),
+                            )
+                    if _remaining_s(started, deadline_s) <= 0:
+                        failure = InferenceFailure.from_code(FailureCode.PROVIDER_TIMEOUT)
+                        event = TextFailed(
+                            failure=failure,
+                            observation=event.observation.model_copy(update={
+                                "state": ObservationState.FAILED,
+                                "failure_code": failure.code,
+                                "provider_attempt_count": 1,
+                            }),
+                        )
                     terminal = True
                     yield _public_stream_terminal(
                         event,
@@ -1264,6 +1306,7 @@ def _public_stream_terminal(
             cached_input_tokens=provider_obs.cached_input_tokens,
             output_tokens=provider_obs.output_tokens,
             reasoning_tokens=provider_obs.reasoning_tokens,
+            provider_attempt_count=provider_obs.provider_attempt_count,
         ),
     )
 

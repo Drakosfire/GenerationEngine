@@ -100,14 +100,16 @@ Products own parsing/domain validation/fallback for this mode.
 ### Prepared ordinary-text dispatch gate
 
 The OpenAI adapter accepts opt-in `TextDispatchGate` from
-`generationengine.text_dispatch`. It authorizes exact SDK-serialized nonstreaming
+`generationengine.text_dispatch`. It authorizes exact SDK-serialized ordinary or streaming
 Responses bytes with an explicit empty tool list and no automatic transport
 retries, redirects or ambient proxy routing. Actual headers/outcome uncertainty
 are distinct from response-body parsing. Guarded text success requires SDK status
 completed, no response error and nonblank text; residual output from failed or
 nonterminal responses fails without retry and retains safe IDs/model/usage.
-Streaming and structural-repair requests
-are rejected on a guarded provider. Existing unguarded execution is unchanged.
+Structural-repair requests and JSON-object streaming are rejected on a guarded
+provider. Strict-schema streaming is supported with `max_conformance_retries=0`.
+Unguarded provider terminal interpretation is unchanged; schema-bearing streaming
+now preserves the requested schema and validates final output as described below.
 Synthetic real-SDK/mock-HTTP tests prove the boundary; live provider and product
 adoption remain separate. See [text dispatch contract](CORE-CONTRACT.md#opt-in-text-dispatch-authorization).
 
@@ -142,7 +144,17 @@ Products retain domain/business/evidence validation.
 
 ## Streaming
 
-`stream_text()` is transport-neutral and yields deltas followed by exactly one terminal event. Streaming does not perform transport retry. Unsupported/invalid requests return a failed terminal rather than provider execution.
+`stream_text()` is transport-neutral and yields provisional deltas followed by
+exactly one terminal event for a fully consumed stream. Streaming does not retry.
+Unsupported/invalid requests return a failed terminal before provider execution.
+Schema-bearing requests require `max_conformance_retries=0` and a valid schema;
+GE validates complete final text locally before `TextCompleted`, without repair.
+OpenAI preserves the native strict schema in its streaming envelope. Products own
+domain validation and publication. Guarded OpenAI streaming preserves exact-byte
+authorization, truthful response-header lifecycle, safe IDs/usage and strict
+provider-terminal checks. It closes resources on completion, failure, early close,
+timeout or cancellation; early retirement does not promise terminal delivery.
+Real locked SDK/mock-SSE tests prove these boundaries, not live provider adoption.
 
 ## Images
 

@@ -1218,3 +1218,83 @@ def test_map_provider_exception_does_not_leak_exception_text() -> None:
     assert timeout.failure.code is FailureCode.PROVIDER_TIMEOUT
     assert timeout.failure.message == "Provider request timed out."
     assert "sk-live" not in timeout.failure.message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text,valid", [('{"value":"ok"}', True), ('{"value":1}', False), ('not JSON', False)])
+async def test_schema_stream_validates_final_text_without_repair_and_retains_usage(text, valid):
+    obs = InferenceObservation(provider="openai", latency_ms=0, retry_count=0,
+        state=ObservationState.COMPLETED, provider_request_id="req", input_tokens=10,
+        output_tokens=3, cached_input_tokens=0, reasoning_tokens=1)
+    provider = FakeTextProvider(stream_events=[TextDelta(text=text), TextCompleted(final_text=text, observation=obs)])
+    client = GenerationClient(text_provider=provider)
+    schema = {"type": "object", "properties": {"value": {"type": "string"}}, "required": ["value"]}
+    events = [e async for e in client.stream_text(TextRequest(user_prompt="hi", provider="openai",
+        model="synthetic", json_schema=schema, max_conformance_retries=0))]
+    terminal = events[-1]
+    assert isinstance(terminal, TextCompleted if valid else TextFailed)
+    if not valid:
+        assert terminal.failure.code is FailureCode.STRUCTURED_OUTPUT_INVALID
+    assert terminal.observation.provider_request_id == "req"
+    assert terminal.observation.input_tokens == 10
+    assert terminal.observation.provider_attempt_count == 1
+    assert terminal.observation.conformance_retry_count == 0
+    assert provider.calls == 0  # streaming only; no generate/repair fallback
+    assert len([e for e in events if isinstance(e, (TextCompleted, TextFailed))]) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("schema,repair", [({"type": "not_a_type"}, 0), ({"type": "object"}, 1)])
+async def test_schema_stream_invalid_schema_or_repair_fails_before_lazy_provider(schema, repair):
+    def unexpected():
+        pytest.fail("Invalid schema stream constructed a provider")
+    client = GenerationClient(text_providers={"openai": unexpected})
+    events = [e async for e in client.stream_text(TextRequest(user_prompt="hi", provider="openai",
+        model="synthetic", json_schema=schema, max_conformance_retries=repair))]
+    assert len(events) == 1 and isinstance(events[0], TextFailed)
+    assert events[0].failure.code is FailureCode.INVALID_REQUEST
+    assert events[0].observation.provider_attempt_count == 0
+
+
+@pytest.mark.asyncio
+async def test_schema_stream_freezes_request_before_yielding_progress():
+    obs = InferenceObservation(provider="openai", latency_ms=0, retry_count=0, state=ObservationState.COMPLETED)
+    provider = FakeTextProvider(stream_events=[TextDelta(text='{"value":1}'),
+        TextCompleted(final_text='{"value":1}', observation=obs)])
+    request = TextRequest(user_prompt="hi", provider="openai", model="synthetic",
+        json_schema={"type": "object", "properties": {"value": {"type": "string"}}},
+        max_conformance_retries=0)
+    stream = GenerationClient(text_provider=provider).stream_text(request)
+    await anext(stream)
+    request.json_schema["properties"]["value"]["type"] = "integer"
+    rest = [e async for e in stream]
+    assert rest[-1].failure.code is FailureCode.STRUCTURED_OUTPUT_INVALID
+
+
+@pytest.mark.asyncio
+async def test_schema_stream_validation_consumes_the_overall_deadline(monkeypatch):
+    import time
+
+    import generationengine.client as execution
+
+    validate = execution.validate_against_schema
+
+    def slow_validate(instance, schema):
+        validate(instance, schema)
+        time.sleep(0.03)  # Synchronous conformance work consumes the same budget.
+
+    monkeypatch.setattr(execution, "validate_against_schema", slow_validate)
+    obs = InferenceObservation(provider="openai", latency_ms=0, retry_count=0,
+        state=ObservationState.COMPLETED, provider_request_id="req-validation",
+        provider_response_id="resp-validation", response_model="synthetic",
+        input_tokens=20, output_tokens=8, cached_input_tokens=0, reasoning_tokens=2)
+    provider = FakeTextProvider(stream_events=[TextCompleted(final_text='{"value":"ok"}', observation=obs)])
+    stream = GenerationClient(text_provider=provider).stream_text(TextRequest(user_prompt="hi",
+        provider="openai", model="synthetic", json_schema={"type":"object"},
+        max_conformance_retries=0, deadline_ms=10))
+    events = [e async for e in stream]
+    assert len(events) == 1 and events[0].failure.code is FailureCode.PROVIDER_TIMEOUT
+    reported = events[0].observation
+    assert (reported.provider_request_id, reported.provider_response_id) == ("req-validation", "resp-validation")
+    assert (reported.input_tokens, reported.output_tokens, reported.cached_input_tokens, reported.reasoning_tokens) == (20, 8, 0, 2)
+    assert reported.provider_attempt_count == 1

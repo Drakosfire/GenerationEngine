@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack
 from typing import Any
 
 from generationengine.failures import FailureCode, InferenceFailure, Retryability
@@ -88,42 +89,7 @@ class OpenAITextProvider:
                 mapped.failure = mapped.failure.model_copy(update={"retryability": Retryability.NO})
             raise mapped from exc
         if self._guarded:
-            status = getattr(response, "status", None)
-            text = getattr(response, "output_text", None)
-            error = getattr(response, "error", None)
-            if status == "completed" and any(
-                getattr(part, "type", None) == "refusal"
-                for item in (getattr(response, "output", None) or [])
-                for part in (getattr(item, "content", None) or [])
-            ):
-                request_id, response_id = _ids_from_response(response)
-                refused = ProviderError.from_code(
-                    FailureCode.PROVIDER_REFUSED, "Provider refused the request.",
-                    provider_request_id=request_id, provider_response_id=response_id,
-                    response_model=getattr(response, "model", None), **_usage_from_response(response),
-                )
-                refused.failure = refused.failure.model_copy(update={"retryability": Retryability.NO})
-                raise refused
-            if (
-                status != "completed"
-                or error is not None
-                or not isinstance(text, str)
-                or not text.strip()
-            ):
-                request_id, response_id = _ids_from_response(response)
-                terminal_failure = ProviderError.from_code(
-                    FailureCode.PROVIDER_ERROR
-                    if status == "failed" or error is not None
-                    else FailureCode.PROVIDER_INCOMPLETE,
-                    provider_request_id=request_id,
-                    provider_response_id=response_id,
-                    response_model=getattr(response, "model", None),
-                    **_usage_from_response(response),
-                )
-                terminal_failure.failure = terminal_failure.failure.model_copy(
-                    update={"retryability": Retryability.NO}
-                )
-                raise terminal_failure
+            return self._guarded_result(response)
         if getattr(response, "status", None) == "incomplete" and not getattr(
             response, "refusal", None
         ):
@@ -138,71 +104,166 @@ class OpenAITextProvider:
             )
         return self._result_from_response(response)
 
-    async def stream(self, call: TextGenerationCall) -> AsyncIterator[TextStreamEvent]:
-        if self._guarded:
-            failure = InferenceFailure.from_code(
-                FailureCode.INVALID_REQUEST, "Guarded text dispatch does not support streaming."
+    def _guarded_result(self, response: Any) -> TextGenerationResult:
+        status = getattr(response, "status", None)
+        text = getattr(response, "output_text", None)
+        error = getattr(response, "error", None)
+        if status == "completed" and any(
+            getattr(part, "type", None) == "refusal"
+            for item in (getattr(response, "output", None) or [])
+            for part in (getattr(item, "content", None) or [])
+        ):
+            request_id, response_id = _ids_from_response(response)
+            refused = ProviderError.from_code(
+                FailureCode.PROVIDER_REFUSED, "Provider refused the request.",
+                provider_request_id=request_id, provider_response_id=response_id,
+                response_model=getattr(response, "model", None), **_usage_from_response(response),
             )
-            yield TextFailed(failure=failure, observation=_empty_failed_observation(failure.code))
+            refused.failure = refused.failure.model_copy(update={"retryability": Retryability.NO})
+            raise refused
+        if (
+            status != "completed"
+            or error is not None
+            or not isinstance(text, str)
+            or not text.strip()
+        ):
+            request_id, response_id = _ids_from_response(response)
+            terminal_failure = ProviderError.from_code(
+                FailureCode.PROVIDER_ERROR
+                if status == "failed" or error is not None
+                else FailureCode.PROVIDER_INCOMPLETE,
+                provider_request_id=request_id,
+                provider_response_id=response_id,
+                response_model=getattr(response, "model", None),
+                **_usage_from_response(response),
+            )
+            terminal_failure.failure = terminal_failure.failure.model_copy(
+                update={"retryability": Retryability.NO}
+            )
+            raise terminal_failure
+        return self._result_from_response(response)
+
+    async def stream(self, call: TextGenerationCall) -> AsyncIterator[TextStreamEvent]:
+        if self._guarded and (
+            call.json_object
+            or (call.json_schema is not None and call.max_conformance_retries != 0)
+        ):
+            failure = InferenceFailure.from_code(
+                FailureCode.INVALID_REQUEST, "Guarded streaming does not support JSON-object mode or repair."
+            )
+            yield TextFailed(
+                failure=failure,
+                observation=_empty_failed_observation(failure.code).model_copy(
+                    update={"provider_attempt_count": 0}
+                ),
+            )
             return
         kwargs = self._request_kwargs(call, streaming=True)
         pieces: list[str] = []
+        latest_response = None
+        request_id = None
         try:
-            stream_manager = self._client.responses.stream(**kwargs)
-            async with stream_manager as response_stream:
+            async with AsyncExitStack() as stack:
+                if self._guarded:
+                    # The raw official SDK stream exposes the public HTTP response,
+                    # preserving its request ID even when SSE/body parsing fails.
+                    raw = await self._client.responses.create(**kwargs, tools=[], stream=True)
+                    response_stream = await stack.enter_async_context(raw)
+                    request_id = raw.response.headers.get("x-request-id")
+                else:
+                    response_stream = await stack.enter_async_context(
+                        self._client.responses.stream(**kwargs)
+                    )
                 async for event in response_stream:
                     event_type = getattr(event, "type", None)
+                    response = getattr(event, "response", None)
+                    if self._guarded and response is not None:
+                        latest_response = response
                     if event_type == "response.output_text.delta":
                         content = getattr(event, "delta", "") or ""
                         if content:
-                            pieces.append(content)
+                            if not self._guarded:
+                                pieces.append(content)
                             yield TextDelta(text=content)
+                    elif self._guarded and event_type in (
+                        "error", "response.error", "response.refusal.delta", "response.refusal.done",
+                    ):
+                        code = (FailureCode.PROVIDER_REFUSED if "refusal" in event_type
+                                else FailureCode.PROVIDER_ERROR)
+                        raise ProviderError.from_code(code, "Provider stream did not complete successfully.")
+                    elif self._guarded and event_type in (
+                        "response.completed", "response.failed", "response.incomplete",
+                        "response.cancelled",
+                    ):
+                        if event_type != "response.completed":
+                            code = (FailureCode.PROVIDER_ERROR if event_type == "response.failed"
+                                    else FailureCode.PROVIDER_INCOMPLETE)
+                            raise ProviderError.from_code(code, "Provider stream did not complete successfully.")
+                        result = self._guarded_result(response)
+                        yield TextCompleted(
+                            final_text=result.text,
+                            observation=_completed_observation(result).model_copy(
+                                update={"provider_request_id": result.provider_request_id or request_id}
+                            ),
+                        )
+                        return
                     elif event_type == "response.error":
                         message = getattr(
-                            getattr(event, "error", None),
-                            "message",
-                            "OpenAI stream error",
+                            getattr(event, "error", None), "message", "OpenAI stream error",
                         )
-                        failure = InferenceFailure.from_code(
-                            FailureCode.PROVIDER_ERROR,
-                            message,
-                        )
+                        failure = InferenceFailure.from_code(FailureCode.PROVIDER_ERROR, message)
                         yield TextFailed(
                             failure=failure,
                             observation=_empty_failed_observation(failure.code),
                         )
                         return
                     elif event_type == "response.completed":
-                        response = getattr(event, "response", None)
-                        result = (
-                            self._result_from_response(response)
-                            if response is not None
-                            else TextGenerationResult(text="".join(pieces))
-                        )
+                        result = (self._result_from_response(response) if response is not None
+                                  else TextGenerationResult(text="".join(pieces)))
                         yield TextCompleted(
                             final_text=result.text or "".join(pieces),
                             observation=_completed_observation(result),
                         )
                         return
-            failure = InferenceFailure.from_code(
-                FailureCode.STREAM_INCOMPLETE,
-                "OpenAI stream ended without a terminal event.",
-            )
-            yield TextFailed(
-                failure=failure,
-                observation=_empty_failed_observation(failure.code),
-            )
-        except ProviderError as exc:
-            yield TextFailed(
-                failure=exc.failure,
-                observation=_empty_failed_observation(exc.failure.code),
+            raise ProviderError.from_code(
+                FailureCode.STREAM_INCOMPLETE, "OpenAI stream ended without a terminal event."
             )
         except Exception as exc:
             mapped = self._map_exception(exc)
-            yield TextFailed(
-                failure=mapped.failure,
-                observation=_empty_failed_observation(mapped.failure.code),
-            )
+            if self._guarded:
+                # The SDK can wrap transport-gate errors in APIConnectionError.
+                # Recover only our typed error; never expose arbitrary cause text.
+                cause = exc
+                seen = set()
+                while cause is not None and id(cause) not in seen:
+                    seen.add(id(cause))
+                    if isinstance(cause, ProviderError):
+                        mapped = cause
+                        break
+                    cause = cause.__cause__
+            if self._guarded:
+                # Header acknowledgment stays authoritative even when the body fails.
+                # No response text or provider error details enter the observation.
+                response_request_id, response_id = _ids_from_response(latest_response)
+                yield TextFailed(
+                    failure=InferenceFailure.from_code(
+                        mapped.failure.code, "Guarded text stream did not complete successfully."
+                    ).model_copy(
+                        update={"retryability": Retryability.NO}
+                    ),
+                    observation=_empty_failed_observation(mapped.failure.code).model_copy(update={
+                        "provider_request_id": mapped.provider_request_id or response_request_id or request_id,
+                        "provider_response_id": mapped.provider_response_id or response_id,
+                        "response_model": mapped.response_model or _field(latest_response, "model"),
+                        **_usage_from_response(latest_response),
+                        "provider_attempt_count": 1,
+                    }),
+                )
+            else:
+                yield TextFailed(
+                    failure=mapped.failure,
+                    observation=_empty_failed_observation(mapped.failure.code),
+                )
 
     def _request_kwargs(
         self, call: TextGenerationCall, *, streaming: bool = False
@@ -221,7 +282,7 @@ class OpenAITextProvider:
             kwargs["instructions"] = call.system_prompt
         if call.json_object:
             kwargs["text"] = {"format": {"type": "json_object"}}
-        elif call.json_schema and not streaming:
+        elif call.json_schema is not None:
             kwargs["text"] = {
                 "format": {
                     "type": "json_schema",
@@ -284,17 +345,22 @@ def _completed_observation(result: TextGenerationResult) -> InferenceObservation
     )
 
 
+def _field(value: Any, name: str) -> Any:
+    # Unknown SDK event variants may retain nested response data as dictionaries.
+    return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
+
+
 def _ids_from_response(response: Any) -> tuple[str | None, str | None]:
-    return getattr(response, "_request_id", None), getattr(response, "id", None)
+    return _field(response, "_request_id"), _field(response, "id")
 
 
 def _usage_from_response(response: Any) -> dict[str, int | None]:
-    usage = getattr(response, "usage", None)
-    input_details = getattr(usage, "input_tokens_details", None)
-    output_details = getattr(usage, "output_tokens_details", None)
+    usage = _field(response, "usage")
+    input_details = _field(usage, "input_tokens_details")
+    output_details = _field(usage, "output_tokens_details")
     return {
-        "input_tokens": getattr(usage, "input_tokens", None),
-        "cached_input_tokens": getattr(input_details, "cached_tokens", None),
-        "output_tokens": getattr(usage, "output_tokens", None),
-        "reasoning_tokens": getattr(output_details, "reasoning_tokens", None),
+        "input_tokens": _field(usage, "input_tokens"),
+        "cached_input_tokens": _field(input_details, "cached_tokens"),
+        "output_tokens": _field(usage, "output_tokens"),
+        "reasoning_tokens": _field(output_details, "reasoning_tokens"),
     }
