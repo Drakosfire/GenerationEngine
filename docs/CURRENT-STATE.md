@@ -113,6 +113,15 @@ now preserves the requested schema and validates final output as described below
 Synthetic real-SDK/mock-HTTP tests prove the boundary; live provider and product
 adoption remain separate. See [text dispatch contract](CORE-CONTRACT.md#opt-in-text-dispatch-authorization).
 
+### OpenAI final-answer selection
+
+Ordinary, guarded and streaming terminal results select one completed assistant
+answer from actual Responses output messages. Explicit `final_answer` excludes
+commentary; one unphased message is valid when unambiguous. Missing answers fail
+incomplete; duplicate, unknown or mixed phases fail malformed without repair,
+resend or aggregate-text fallback. Refusal and guarded status checks remain in
+force, and usage/IDs cover the entire received response. Deltas stay provisional.
+
 ## Structured generation
 
 `generate_structured()` implements provider-independent structural conformance:

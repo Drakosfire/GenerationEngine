@@ -159,6 +159,20 @@ The route applies unchanged to ordinary, JSON-object, structured, repair,
 transport-retry, and streaming calls. It does not select a GE model, add a
 catalog record, or expose arbitrary provider request fields.
 
+### OpenAI answer messages
+
+OpenAI text results and stream terminal text come from exactly one completed
+assistant answer message. When phases are present, only `final_answer` supplies
+the answer; `commentary` is intermediate output. A single unphased assistant
+message is also a valid current Responses representation. Multiple answers,
+unknown phases, or mixed phased/unphased answer messages fail as
+`MALFORMED_PROVIDER_RESPONSE`; absent, blank or incomplete answers fail as
+`PROVIDER_INCOMPLETE`. Refusal takes precedence. GE does not use SDK aggregate
+`output_text`, choose by JSON validity, repair text or retry ambiguous selection.
+Safe provider IDs/model/usage and dispatch receipts remain intact. Streaming
+deltas remain provisional; they never replace a missing or invalid terminal
+answer. Product evidence/domain validation still follows structural conformance.
+
 ### Schema-less JSON-object mode
 
 `TextRequest.json_object` and `TextGenerationCall.json_object` are
