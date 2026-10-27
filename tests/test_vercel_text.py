@@ -315,7 +315,11 @@ async def test_real_sse_terminal_truth_and_close(reason, code):
 
     def handler(request):
         bodies.append(json.loads(request.content))
-        return httpx.Response(200, stream=wire, headers={"content-type": "text/event-stream"})
+        return httpx.Response(
+            200,
+            stream=wire,
+            headers={"content-type": "text/event-stream", "x-request-id": "stream-http-id"},
+        )
 
     engine, _, http = engine_with(handler)
     try:
@@ -345,6 +349,7 @@ async def test_real_sse_terminal_truth_and_close(reason, code):
             assert isinstance(seen[-1], TextCompleted)
             assert seen[-1].final_text == '{"name":"oak"}'
             assert seen[-1].observation.input_tokens == 31
+            assert seen[-1].observation.provider_request_id == "stream-http-id"
     finally:
         await engine.aclose()
     assert http.is_closed
@@ -517,3 +522,73 @@ async def test_stream_cancellation_closes_response():
         await pending
     assert wire.closed
     await engine.aclose()
+
+
+@pytest.mark.asyncio
+async def test_negative_usage_is_public_failure_with_other_safe_facts_retained():
+    response = completion()
+    response["usage"]["prompt_tokens"] = -1
+    engine, _, _ = engine_with(
+        lambda request: httpx.Response(200, json=response, headers={"x-request-id": "safe-http-id"})
+    )
+    try:
+        with pytest.raises(GenerationEngineError) as exc:
+            await engine.generate_text(
+                TextRequest(provider="vercel", model="vendor/model", user_prompt="x")
+            )
+        assert exc.value.failure.code is FailureCode.MALFORMED_PROVIDER_RESPONSE
+        assert exc.value.observation.input_tokens is None
+        assert exc.value.observation.output_tokens == 7
+        assert exc.value.observation.provider_request_id == "safe-http-id"
+    finally:
+        await engine.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["id", "model"])
+async def test_usage_only_chunk_cannot_replace_stream_identity(field):
+    last = {
+        "id": "stream-response",
+        "model": "vendor/resolved-model",
+        "object": "chat.completion.chunk",
+        "created": 1,
+        "choices": [],
+        "usage": completion()["usage"],
+    }
+    last[field] = "different-identity"
+    wire = SSE([chunk("one", "stop"), last])
+    engine, _, _ = engine_with(
+        lambda request: httpx.Response(
+            200, stream=wire, headers={"content-type": "text/event-stream"}
+        )
+    )
+    try:
+        seen = [
+            event
+            async for event in engine.stream_text(
+                TextRequest(provider="vercel", model="vendor/model", user_prompt="x")
+            )
+        ]
+        assert wire.closed
+        assert isinstance(seen[-1], TextFailed)
+        assert seen[-1].failure.code is FailureCode.MALFORMED_PROVIDER_RESPONSE
+        assert not any(isinstance(e, TextCompleted) for e in seen)
+    finally:
+        await engine.aclose()
+
+
+@pytest.mark.asyncio
+async def test_malformed_response_identity_is_normalized_without_pydantic_escape():
+    response = completion()
+    response["id"] = 7
+    engine, _, _ = engine_with(lambda request: httpx.Response(200, json=response))
+    try:
+        with pytest.raises(GenerationEngineError) as exc:
+            await engine.generate_text(
+                TextRequest(provider="vercel", model="vendor/model", user_prompt="x")
+            )
+        assert exc.value.failure.code is FailureCode.MALFORMED_PROVIDER_RESPONSE
+        assert exc.value.observation.provider_response_id is None
+        assert exc.value.observation.input_tokens == 31
+    finally:
+        await engine.aclose()

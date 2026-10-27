@@ -56,9 +56,12 @@ class VercelTextProvider:
             raise _error(FailureCode.MALFORMED_PROVIDER_RESPONSE, facts)
         choice = choices[0]
         message = getattr(choice, "message", None)
-        if getattr(message, "refusal", None) or choice.finish_reason == "content_filter":
+        if (
+            getattr(message, "refusal", None)
+            or getattr(choice, "finish_reason", None) == "content_filter"
+        ):
             raise _error(FailureCode.PROVIDER_REFUSED, facts)
-        _check_finish(choice.finish_reason, facts)
+        _check_finish(getattr(choice, "finish_reason", None), facts)
         if (
             getattr(message, "role", None) != "assistant"
             or getattr(message, "tool_calls", None)
@@ -77,10 +80,18 @@ class VercelTextProvider:
             kwargs = self._request_kwargs(call, streaming=True)
             stream = await self._client.chat.completions.create(**kwargs)
             try:
+                facts["provider_request_id"] = stream.response.headers.get("x-request-id")
                 async for chunk in stream:
                     update = _response_facts(chunk)
                     for key, value in update.items():
                         if value is not None:
+                            if (
+                                key
+                                in ("provider_request_id", "provider_response_id", "response_model")
+                                and facts.get(key) is not None
+                                and facts[key] != value
+                            ):
+                                raise _error(FailureCode.MALFORMED_PROVIDER_RESPONSE, facts)
                             facts[key] = value
                     choices = getattr(chunk, "choices", None) or []
                     if not choices:  # The SDK may emit a final usage-only chunk.
@@ -192,7 +203,7 @@ def _response_facts(response: Any) -> dict[str, Any]:
     usage = getattr(response, "usage", None)
     prompt_details = getattr(usage, "prompt_tokens_details", None)
     completion_details = getattr(usage, "completion_tokens_details", None)
-    return {
+    facts = {
         "provider_request_id": getattr(response, "_request_id", None),
         "provider_response_id": getattr(response, "id", None),
         "response_model": getattr(response, "model", None),
@@ -201,6 +212,18 @@ def _response_facts(response: Any) -> dict[str, Any]:
         "output_tokens": getattr(usage, "completion_tokens", None),
         "reasoning_tokens": getattr(completion_details, "reasoning_tokens", None),
     }
+    invalid = [
+        key
+        for key in _FACT_NAMES[3:]
+        if facts[key] is not None and (type(facts[key]) is not int or facts[key] < 0)
+    ]
+    invalid.extend(
+        key for key in _FACT_NAMES[:3] if facts[key] is not None and not isinstance(facts[key], str)
+    )
+    if invalid:
+        safe_facts = {key: value for key, value in facts.items() if key not in invalid}
+        raise _error(FailureCode.MALFORMED_PROVIDER_RESPONSE, safe_facts)
+    return facts
 
 
 def _error(code: FailureCode, facts: dict[str, Any]) -> ProviderError:
