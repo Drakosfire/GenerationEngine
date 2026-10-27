@@ -289,3 +289,114 @@ async def test_concurrent_sdk_calls_keep_distinct_authorized_bytes_and_lifecycle
             "response_received",
         ]
     assert wire.closed
+
+
+@pytest.mark.asyncio
+async def test_context_selection_binds_actual_sdk_bytes_mode_and_owned_header():
+    from generationengine.decision_dispatch import DecisionContextMode
+
+    wire, selected, authorized, events = Wire(), [], [], []
+
+    async def select(view):
+        selected.append(view)
+        assert view.context_mode is DecisionContextMode.DEFAULT
+        assert json.loads(view.body)["state"] == {"page": "雪"}
+        return DecisionContextMode.LONG_CONTEXT
+
+    async def authorize(view):
+        authorized.append(view)
+        assert view.context_mode is DecisionContextMode.LONG_CONTEXT
+        return True
+
+    async def record(event):
+        events.append(event)
+        return True
+
+    adapter = TypeSafeDecisionProvider(api_key="private", transport=wire,
+        dispatch_gate=DecisionDispatchGate(authorize, record, select))
+    client = GenerationClient(decision_providers={"typesafe": adapter})
+    try:
+        await client.decide(request().model_copy(update={"model": "jev-1.14.0", "state": {"page": "雪"}}))
+    finally:
+        await client.aclose()
+    assert len(wire.calls) == len(selected) == len(authorized) == 1
+    assert wire.calls[0].headers["TypeSafe-Danger-Zone-Long-Context"] == "true"
+    assert selected[0].body == authorized[0].body == wire.calls[0].content
+    assert all(e.request is authorized[0] for e in events)
+    assert selected[0].context_mode is DecisionContextMode.DEFAULT
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selection", ["default", "long_context", True, None, "raise"])
+async def test_invalid_context_selection_fails_known_not_sent(selection):
+    wire, events = Wire(), []
+
+    async def select(_):
+        if selection == "raise":
+            raise RuntimeError("private selector detail")
+        return selection
+
+    async def authorize(_):
+        pytest.fail("Invalid selection cannot authorize")
+
+    async def record(event):
+        events.append(event)
+        return True
+
+    adapter = TypeSafeDecisionProvider(api_key="private", transport=wire,
+        dispatch_gate=DecisionDispatchGate(authorize, record, select))
+    client = GenerationClient(decision_providers={"typesafe": adapter})
+    try:
+        with pytest.raises(GenerationEngineError):
+            await client.decide(request().model_copy(update={"model": "jev-1.14.0", "max_transport_retries": 2}))
+    finally:
+        await client.aclose()
+    assert not wire.calls
+    assert [e.outcome for e in events] == ["known_not_sent"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_context_selection_is_request_local():
+    from generationengine.decision_dispatch import DecisionContextMode
+    wire, events = Wire(), []
+
+    async def select(view):
+        await asyncio.sleep(0)
+        return DecisionContextMode.LONG_CONTEXT if json.loads(view.body)["state"] == "long" else DecisionContextMode.DEFAULT
+
+    async def authorize(view):
+        return True
+
+    async def record(event):
+        events.append(event)
+        return True
+
+    adapter = TypeSafeDecisionProvider(api_key="private", transport=wire,
+        dispatch_gate=DecisionDispatchGate(authorize, record, select))
+    client = GenerationClient(decision_providers={"typesafe": adapter})
+    try:
+        await asyncio.gather(*(client.decide(request().model_copy(update={"model": "jev-1.14.0", "state": state})) for state in ["long", "short"]))
+    finally:
+        await client.aclose()
+    assert len(wire.calls) == 2
+    for req in wire.calls:
+        long = json.loads(req.content)["state"] == "long"
+        assert req.headers.get("TypeSafe-Danger-Zone-Long-Context") == ("true" if long else None)
+    for event in events:
+        long = json.loads(event.request.body)["state"] == "long"
+        assert event.request.context_mode is (DecisionContextMode.LONG_CONTEXT if long else DecisionContextMode.DEFAULT)
+
+
+@pytest.mark.asyncio
+async def test_ambient_context_header_cannot_bypass_selector():
+    wire = Wire()
+    async def unexpected(_):
+        pytest.fail("Unbound header must fail before authorization")
+    transport = GuardedTypeSafeTransport(DecisionDispatchGate(unexpected, unexpected), wire)
+    req = httpx2.Request("POST", "https://ai-gateway.vercel.sh/typesafe/v1/systemone",
+        headers={"typesafe-danger-zone-long-context": "true"}, json={"model": "jev-1.14.0"})
+    from generationengine.providers.errors import ProviderError
+    with pytest.raises(ProviderError):
+        await transport.handle_async_request(req)
+    assert not wire.calls
+    await transport.aclose()
