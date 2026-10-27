@@ -35,6 +35,15 @@ Actual SDK serialization, concurrent calls and failure boundaries are tested wit
 mock HTTP transports; this feature does not claim a live provider witness or
 product adoption. See the [dispatch contract](CORE-CONTRACT.md#opt-in-decision-dispatch-authorization).
 
+The guarded TypeSafe gate also supports an optional closed context selector over
+actual prepared bytes. Its final descriptor records `DEFAULT` or `LONG_CONTEXT`;
+the latter adds only the adapter-owned TypeSafe long-context header. Selection
+and persistence remain product-owned, and cannot authorize a send. Invalid
+selection or an ambient context header fails before network entry. No default,
+model, retry or prompt changes are introduced. SDK/mock transport tests cover the
+contract; a separate synthetic Gateway contrast observed default400 versus
+long-context200 on identical over-default input, without proving product quality.
+
 ## Text execution
 
 Registered text providers:

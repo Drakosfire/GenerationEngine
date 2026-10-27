@@ -4,18 +4,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from typing import Literal
 from uuid import uuid4
 
 import httpx2
 
 from generationengine.decision_dispatch import (
+    DecisionContextMode,
     DecisionDispatchEvent,
     DecisionDispatchGate,
     PreparedDecisionDispatch,
 )
 from generationengine.failures import FailureCode
 from generationengine.providers.errors import ProviderError
+
+_LONG_CONTEXT_HEADER = "TypeSafe-Danger-Zone-Long-Context"
 
 _ENDPOINT = "https://ai-gateway.vercel.sh/typesafe/v1/systemone"
 
@@ -53,6 +57,7 @@ class GuardedTypeSafeTransport(httpx2.AsyncBaseTransport):
                 request.method != "POST"
                 or str(request.url) != _ENDPOINT
                 or request.headers.get("content-encoding")
+                or _LONG_CONTEXT_HEADER in request.headers
                 or not isinstance(model, str)
                 or not model
             ):
@@ -76,14 +81,22 @@ class GuardedTypeSafeTransport(httpx2.AsyncBaseTransport):
         )
         original_headers = tuple(request.headers.multi_items())
         original_stream = request.stream
-        wire_request = httpx2.Request(
-            prepared.method,
-            prepared.url,
-            headers=original_headers,
-            content=prepared.body,
-            extensions=dict(request.extensions),
-        )
         try:
+            if self.gate.select_context is not None:
+                mode = await self.gate.select_context(prepared)
+                if type(mode) is not DecisionContextMode:
+                    raise _gate_error()
+                prepared = replace(prepared, context_mode=mode)
+            wire_headers = list(original_headers)
+            if prepared.context_mode is DecisionContextMode.LONG_CONTEXT:
+                wire_headers.append((_LONG_CONTEXT_HEADER, "true"))
+            wire_request = httpx2.Request(
+                prepared.method,
+                prepared.url,
+                headers=wire_headers,
+                content=prepared.body,
+                extensions=dict(request.extensions),
+            )
             if await self.gate.authorize(prepared) is not True:
                 raise _gate_error()
             if (

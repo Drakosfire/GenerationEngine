@@ -673,6 +673,23 @@ the owning provider closes the injected transport. An injected SDK client cannot
 be combined with a dispatch gate. Unguarded provider behavior is unchanged.
 
 
+### Request-bound decision context mode
+
+`DecisionDispatchGate.select_context` optionally receives the actual prepared
+request before authorization and must return a `DecisionContextMode` enum:
+`DEFAULT` or `LONG_CONTEXT`. Strings, booleans, absent results and callback errors
+refuse before network entry. The final immutable `PreparedDecisionDispatch`
+includes the selected `context_mode`; both authorization and lifecycle callbacks
+receive it with the exact body identity. Products own mode selection, capacity
+accounting and persistence. Selection does not authorize sending.
+
+The guarded TypeSafe transport alone maps `LONG_CONTEXT` to
+`TypeSafe-Danger-Zone-Long-Context: true`. Ambient caller-supplied copies of that
+header are rejected. With no selector or `DEFAULT`, no header is added. Original
+request body/headers/stream are still checked for mutation after callbacks.
+There is no automatic mode escalation, retry or fallback. Provider acceptance,
+limits and semantic quality remain provider/product verification concerns.
+
 ## Opt-in text dispatch authorization
 
 `generationengine.text_dispatch` supplies `TextDispatchGate`,
