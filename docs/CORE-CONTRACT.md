@@ -600,7 +600,7 @@ fal extra:        fal-client
 dev group:        pytest, pytest-asyncio, ruff
 ```
 
-`GenerationClient.from_env()` lazy-loads OpenAI, OpenRouter, and Fal adapters on first use so a core-only wheel import does not require provider extras. CI proves that boundary with an isolated built-wheel import step.
+`GenerationClient.from_env()` lazy-loads OpenAI, OpenRouter, Vercel, and Fal adapters on first use so a core-only wheel import does not require provider extras. CI proves that boundary with an isolated built-wheel import step.
 
 Text through OpenAI requires `OPENAI_API_KEY`. Text through OpenRouter requires `OPENROUTER_API_KEY`. Images require `FAL_KEY`.
 
@@ -724,3 +724,23 @@ The supported OpenAI SDK `http_client` injection and `max_retries=0` are documen
 in the [official Python reference](https://developers.openai.com/api/reference/python).
 Tests exercise the installed locked SDK 2.14.0 with HTTPX; this slice does not
 upgrade the SDK to the newer HTTPX2 documentation implementation.
+
+
+## Vercel text execution
+
+The optional `vercel` extra uses the OpenAI SDK against the fixed Vercel AI Gateway
+Chat Completions endpoint; its credential is `AI_GATEWAY_API_KEY`. Explicit
+provider=`vercel` and model selection requires no catalog entry. GE does not select
+a substitute model or add gateway fallback configuration. Product model policy
+remains caller-owned. OpenRouter `provider_route` is unsupported on this adapter.
+
+Native JSON Schema requests do not replace local GE conformance. JSON-object
+intent maps to the gateway's documented schema-less JSON format. Reasoning effort
+is forwarded when supplied; unavailable per-model controls remain provider errors.
+Only assistant content with a single `stop` completion is an answer; refusal,
+truncation, tool calls and malformed responses are not usable completions. Stream
+content is provisional until a valid terminal, with response cleanup on all exits.
+
+Wire references: [requests](https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions/chat-completions),
+[structured outputs](https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions/structured-outputs),
+[reasoning](https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions/reasoning).
