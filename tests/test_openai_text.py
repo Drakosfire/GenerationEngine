@@ -392,3 +392,46 @@ async def test_openai_generate_omits_temperature_when_none() -> None:
     await provider.generate(_openai_call(temperature=None))
     assert "temperature" not in responses.calls[0]
     assert responses.calls[0]["model"] == "gpt-5.1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind,code", [
+    ("missing", FailureCode.PROVIDER_INCOMPLETE),
+    ("duplicate", FailureCode.MALFORMED_PROVIDER_RESPONSE),
+    ("refusal", FailureCode.PROVIDER_REFUSED),
+])
+async def test_ordinary_stream_terminal_failure_preserves_received_metadata(kind, code):
+    from generationengine.providers.base import TextFailed
+
+    response = _sdk_response(text="provisional private content", input_tokens=17, output_tokens=9)
+    response.usage.output_tokens_details = SimpleNamespace(reasoning_tokens=3)
+    if kind == "missing":
+        response.output[0].phase = "commentary"
+    elif kind == "duplicate":
+        response.output.append(response.output[0])
+    else:
+        response.output[0].content = [SimpleNamespace(type="refusal", refusal="private refusal")]
+
+    class StreamManager:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_args):
+            return None
+        def __aiter__(self):
+            async def events():
+                yield SimpleNamespace(type="response.output_text.delta", delta="provisional private content")
+                yield SimpleNamespace(type="response.completed", response=response)
+            return events()
+
+    provider = OpenAITextProvider(client=SimpleNamespace(
+        responses=SimpleNamespace(stream=lambda **_kwargs: StreamManager())))
+    events = [event async for event in provider.stream(_openai_call())]
+    assert isinstance(events[-1], TextFailed)
+    assert not any(isinstance(event, TextCompleted) for event in events)
+    terminal = events[-1]
+    assert terminal.failure.code is code
+    assert "private" not in terminal.failure.message
+    obs = terminal.observation
+    assert (obs.provider_request_id, obs.provider_response_id, obs.response_model) == (
+        "req_http", "resp_abc", "gpt-5.1")
+    assert (obs.input_tokens, obs.cached_input_tokens, obs.output_tokens, obs.reasoning_tokens) == (17, 0, 9, 3)

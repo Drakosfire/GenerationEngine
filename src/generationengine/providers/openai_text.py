@@ -251,7 +251,15 @@ class OpenAITextProvider:
             else:
                 yield TextFailed(
                     failure=mapped.failure,
-                    observation=_empty_failed_observation(mapped.failure.code),
+                    observation=_empty_failed_observation(mapped.failure.code).model_copy(update={
+                        "provider_request_id": mapped.provider_request_id,
+                        "provider_response_id": mapped.provider_response_id,
+                        "response_model": mapped.response_model,
+                        "input_tokens": mapped.input_tokens,
+                        "cached_input_tokens": mapped.cached_input_tokens,
+                        "output_tokens": mapped.output_tokens,
+                        "reasoning_tokens": mapped.reasoning_tokens,
+                    }),
                 )
 
     def _request_kwargs(
@@ -307,7 +315,6 @@ class OpenAITextProvider:
         return map_openai_compatible_exception(exc)
 
 
-
 def _response_refused(response: Any) -> bool:
     return bool(_field(response, "refusal")) or any(
         _field(part, "type") == "refusal"
@@ -352,6 +359,7 @@ def _final_response_text(response: Any) -> str:
     if not text.strip():
         fail(FailureCode.PROVIDER_INCOMPLETE)
     return text
+
 
 def _empty_failed_observation(code: FailureCode) -> InferenceObservation:
     return InferenceObservation(
