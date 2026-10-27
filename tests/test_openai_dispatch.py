@@ -840,3 +840,164 @@ async def test_guarded_stream_transport_failure_before_headers_is_uncertain(outc
         assert seen == ["sending", "outcome_unknown"]
     finally:
         await engine.aclose()
+
+
+class PhaseWire(Wire):
+    def __init__(self, output):
+        super().__init__()
+        self.output = output
+
+    async def handle_async_request(self, req):
+        response = await super().handle_async_request(req)
+        body = json.loads(response.content)
+        body["output"] = self.output
+        self.response = httpx.Response(200, json=body, headers=response.headers, request=req)
+        return self.response
+
+
+def phase_message(phase, text, *, message_id="msg_answer"):
+    return dict(type="message", id=message_id, role="assistant", status="completed",
+                phase=phase, content=[dict(type="output_text", text=text, annotations=[])])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("guarded", [False, True])
+async def test_final_phase_excludes_commentary_before_structured_conformance(guarded):
+    from openai import AsyncOpenAI
+
+    wire = PhaseWire([
+        phase_message("commentary", '{"value":"draft"}<|fim_suffix|>', message_id="msg_comment"),
+        phase_message("final_answer", '{"value":"supported"}'),
+    ])
+    views, lifecycle, attempts = [], [], []
+    async def authorize(view):
+        views.append(view)
+        return True
+    async def record(event):
+        lifecycle.append(event)
+        return True
+    async def completed(event):
+        attempts.append(event)
+    if guarded:
+        engine = client(wire, authorize, record)
+    else:
+        sdk = AsyncOpenAI(api_key=SECRET, max_retries=0,
+                          http_client=httpx.AsyncClient(transport=wire))
+        engine = GenerationClient(text_providers={"openai": OpenAITextProvider(client=sdk)})
+    try:
+        result = await engine.generate_structured(
+            request(json_schema=SCHEMA, max_conformance_retries=0), on_attempt_completed=completed)
+    finally:
+        await engine.aclose()
+    assert result.parsed == {"value": "supported"}
+    assert attempts[0].text == '{"value":"supported"}'
+    assert len(wire.calls) == len(attempts) == 1
+    assert (result.observation.provider_request_id, result.observation.provider_response_id) == (
+        "req_synthetic", "resp_synthetic")
+    assert (result.observation.input_tokens, result.observation.output_tokens) == (20, 8)
+    assert result.observation.conformance_retry_count == 0
+    if guarded:
+        assert len(views) == 1 and views[0].body == wire.calls[0].content
+        assert [event.outcome for event in lifecycle] == ["sending", "response_received"]
+    assert wire.closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("output,code", [
+    ([phase_message(None, "one"), phase_message(None, "two")], "MALFORMED_PROVIDER_RESPONSE"),
+    ([phase_message("commentary", "not a final")], "PROVIDER_INCOMPLETE"),
+    ([], "PROVIDER_INCOMPLETE"),
+    ([phase_message("final_answer", "one"), phase_message("final_answer", "two")], "MALFORMED_PROVIDER_RESPONSE"),
+    ([phase_message("unknown", "one")], "MALFORMED_PROVIDER_RESPONSE"),
+    ([phase_message(None, "one"), phase_message("final_answer", "two")], "MALFORMED_PROVIDER_RESPONSE"),
+    ([phase_message("final_answer", "  ")], "PROVIDER_INCOMPLETE"),
+    ([dict(phase_message("final_answer", "partial"), status="incomplete")], "PROVIDER_INCOMPLETE"),
+])
+async def test_ambiguous_or_missing_final_retains_accounting_without_retry(output, code):
+    wire, lifecycle = PhaseWire(output), []
+    async def authorize(_):
+        return True
+    async def record(event):
+        lifecycle.append(event)
+        return True
+    engine = client(wire, authorize, record)
+    try:
+        with pytest.raises(GenerationEngineError) as error:
+            await engine.generate_text(request())
+    finally:
+        await engine.aclose()
+    assert error.value.failure.code.value == code
+    assert error.value.failure.retryability.value == "no"
+    obs = error.value.observation
+    assert obs.state.value != "completed"
+    assert (obs.provider_request_id, obs.provider_response_id) == ("req_synthetic", "resp_synthetic")
+    assert (obs.input_tokens, obs.output_tokens) == (20, 8)
+    assert obs.provider_attempt_count == len(wire.calls) == 1
+    assert [event.outcome for event in lifecycle] == ["sending", "response_received"]
+    assert "not a final" not in error.value.failure.message
+
+
+@pytest.mark.asyncio
+async def test_refusal_in_commentary_precedes_final_text():
+    comment = phase_message("commentary", "unused")
+    comment["content"] = [dict(type="refusal", refusal="private refusal")]
+    wire = PhaseWire([comment, phase_message("final_answer", "must not deliver")])
+    async def authorize(_):
+        return True
+    async def record(_):
+        return True
+    engine = client(wire, authorize, record)
+    try:
+        with pytest.raises(GenerationEngineError) as error:
+            await engine.generate_text(request())
+    finally:
+        await engine.aclose()
+    assert error.value.failure.code.value == "PROVIDER_REFUSED"
+    assert error.value.observation.input_tokens == 20
+    assert "private refusal" not in error.value.failure.message
+    assert len(wire.calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", [None, "final_answer"])
+async def test_single_answer_joins_its_own_text_parts_in_order(phase):
+    message = phase_message(phase, "first ")
+    message["content"].append(dict(type="output_text", text="second", annotations=[]))
+    wire = PhaseWire([message])
+    async def authorize(_):
+        return True
+    async def record(_):
+        return True
+    engine = client(wire, authorize, record)
+    try:
+        result = await engine.generate_text(request())
+    finally:
+        await engine.aclose()
+    assert result.text == "first second"
+    assert len(wire.calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", [False, True])
+async def test_stream_terminal_selects_final_and_never_promotes_provisional_text(invalid):
+    from generationengine import TextCompleted, TextFailed
+
+    output = [phase_message("commentary", 'draft<|fim_suffix|>')]
+    if not invalid:
+        output.append(phase_message("final_answer", '{"value":"supported"}'))
+    body = SSEBody(stream_events(output=output))
+    wire = SSEWire(body)
+    events, views, lifecycle = await capture_stream(wire)
+    assert len(wire.calls) == len(views) == 1
+    assert [event.outcome for event in lifecycle] == ["sending", "response_received"]
+    terminal = events[-1]
+    if invalid:
+        assert isinstance(terminal, TextFailed)
+        assert terminal.failure.code.value == "PROVIDER_INCOMPLETE"
+        assert not any(isinstance(event, TextCompleted) for event in events)
+    else:
+        assert isinstance(terminal, TextCompleted)
+        assert terminal.final_text == '{"value":"supported"}'
+    assert terminal.observation.input_tokens == 20
+    assert terminal.observation.provider_response_id == "resp_stream"
+    assert body.closed and wire.closed

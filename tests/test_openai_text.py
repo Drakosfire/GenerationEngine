@@ -58,6 +58,8 @@ def test_request_id_is_http_id_not_response_object_id() -> None:
         id="resp_abc",
         _request_id="req_http",
         output_text="ok",
+        output=[SimpleNamespace(type="message", role="assistant", status="completed", phase=None,
+                                content=[SimpleNamespace(type="output_text", text="ok")])],
         model="gpt-5.1",
         usage=None,
         refusal=None,
@@ -108,6 +110,8 @@ def _sdk_response(*, text: str, input_tokens: int = 4, output_tokens: int = 1) -
         id="resp_abc",
         _request_id="req_http",
         output_text=text,
+        output=[SimpleNamespace(type="message", role="assistant", status="completed", phase=None,
+                                content=[SimpleNamespace(type="output_text", text=text)])],
         model="gpt-5.1",
         usage=SimpleNamespace(
             input_tokens=input_tokens,

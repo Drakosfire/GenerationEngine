@@ -90,9 +90,7 @@ class OpenAITextProvider:
             raise mapped from exc
         if self._guarded:
             return self._guarded_result(response)
-        if getattr(response, "status", None) == "incomplete" and not getattr(
-            response, "refusal", None
-        ):
+        if getattr(response, "status", None) == "incomplete" and not _response_refused(response):
             request_id, response_id = _ids_from_response(response)
             usage = _usage_from_response(response)
             raise ProviderError.from_code(
@@ -106,13 +104,8 @@ class OpenAITextProvider:
 
     def _guarded_result(self, response: Any) -> TextGenerationResult:
         status = getattr(response, "status", None)
-        text = getattr(response, "output_text", None)
         error = getattr(response, "error", None)
-        if status == "completed" and any(
-            getattr(part, "type", None) == "refusal"
-            for item in (getattr(response, "output", None) or [])
-            for part in (getattr(item, "content", None) or [])
-        ):
+        if _response_refused(response):
             request_id, response_id = _ids_from_response(response)
             refused = ProviderError.from_code(
                 FailureCode.PROVIDER_REFUSED, "Provider refused the request.",
@@ -124,8 +117,6 @@ class OpenAITextProvider:
         if (
             status != "completed"
             or error is not None
-            or not isinstance(text, str)
-            or not text.strip()
         ):
             request_id, response_id = _ids_from_response(response)
             terminal_failure = ProviderError.from_code(
@@ -159,7 +150,6 @@ class OpenAITextProvider:
             )
             return
         kwargs = self._request_kwargs(call, streaming=True)
-        pieces: list[str] = []
         latest_response = None
         request_id = None
         try:
@@ -182,8 +172,6 @@ class OpenAITextProvider:
                     if event_type == "response.output_text.delta":
                         content = getattr(event, "delta", "") or ""
                         if content:
-                            if not self._guarded:
-                                pieces.append(content)
                             yield TextDelta(text=content)
                     elif self._guarded and event_type in (
                         "error", "response.error", "response.refusal.delta", "response.refusal.done",
@@ -218,10 +206,11 @@ class OpenAITextProvider:
                         )
                         return
                     elif event_type == "response.completed":
-                        result = (self._result_from_response(response) if response is not None
-                                  else TextGenerationResult(text="".join(pieces)))
+                        if response is None:
+                            raise ProviderError.from_code(FailureCode.PROVIDER_INCOMPLETE)
+                        result = self._result_from_response(response)
                         yield TextCompleted(
-                            final_text=result.text or "".join(pieces),
+                            final_text=result.text,
                             observation=_completed_observation(result),
                         )
                         return
@@ -295,17 +284,18 @@ class OpenAITextProvider:
 
     def _result_from_response(self, response: Any) -> TextGenerationResult:
         request_id, response_id = _ids_from_response(response)
-        if getattr(response, "refusal", None):
+        if _response_refused(response):
             raise ProviderError.from_code(
                 FailureCode.PROVIDER_REFUSED,
-                f"Generation refused: {response.refusal}",
+                "Provider refused the request.",
                 provider_request_id=request_id,
                 provider_response_id=response_id,
                 response_model=getattr(response, "model", None),
+                **_usage_from_response(response),
             )
         usage = _usage_from_response(response)
         return TextGenerationResult(
-            text=getattr(response, "output_text", None),
+            text=_final_response_text(response),
             parsed=None,
             provider_request_id=request_id,
             provider_response_id=response_id,
@@ -316,6 +306,52 @@ class OpenAITextProvider:
     def _map_exception(self, exc: Exception) -> ProviderError:
         return map_openai_compatible_exception(exc)
 
+
+
+def _response_refused(response: Any) -> bool:
+    return bool(_field(response, "refusal")) or any(
+        _field(part, "type") == "refusal"
+        for item in (_field(response, "output") or [])
+        for part in (_field(item, "content") or [])
+    )
+
+
+def _final_response_text(response: Any) -> str:
+    """Select the answer message; SDK output_text also contains commentary."""
+    def fail(code: FailureCode) -> None:
+        request_id, response_id = _ids_from_response(response)
+        raise ProviderError.from_code(
+            code, "Provider response has no unambiguous completed answer.",
+            provider_request_id=request_id, provider_response_id=response_id,
+            response_model=_field(response, "model"), **_usage_from_response(response),
+        )
+
+    messages = [item for item in (_field(response, "output") or [])
+                if _field(item, "type") == "message"]
+    if any(_field(item, "role") != "assistant"
+           or _field(item, "phase") not in (None, "commentary", "final_answer")
+           for item in messages):
+        fail(FailureCode.MALFORMED_PROVIDER_RESPONSE)
+    phased = any(_field(item, "phase") is not None for item in messages)
+    if phased and any(_field(item, "phase") is None for item in messages):
+        fail(FailureCode.MALFORMED_PROVIDER_RESPONSE)
+    answers = ([item for item in messages if _field(item, "phase") == "final_answer"]
+               if phased else messages)
+    if not answers:
+        fail(FailureCode.PROVIDER_INCOMPLETE)
+    if len(answers) != 1:
+        fail(FailureCode.MALFORMED_PROVIDER_RESPONSE)
+    answer = answers[0]
+    if _field(answer, "status") != "completed":
+        fail(FailureCode.PROVIDER_INCOMPLETE)
+    parts = _field(answer, "content") or []
+    if any(_field(part, "type") != "output_text"
+           or not isinstance(_field(part, "text"), str) for part in parts):
+        fail(FailureCode.MALFORMED_PROVIDER_RESPONSE)
+    text = "".join(_field(part, "text") for part in parts)
+    if not text.strip():
+        fail(FailureCode.PROVIDER_INCOMPLETE)
+    return text
 
 def _empty_failed_observation(code: FailureCode) -> InferenceObservation:
     return InferenceObservation(
