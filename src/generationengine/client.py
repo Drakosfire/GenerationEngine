@@ -158,6 +158,15 @@ class GenerationClient:
                 raise _config_error(exc.failure, provider="openrouter") from exc
             self._text_providers[key] = provider
             return provider
+        if key == "vercel":
+            from generationengine.providers.vercel_text import VercelTextProvider
+
+            try:
+                provider = VercelTextProvider()
+            except ProviderError as exc:
+                raise _config_error(exc.failure, provider="vercel") from exc
+            self._text_providers[key] = provider
+            return provider
         raise _config_error(
             InferenceFailure.from_code(
                 FailureCode.UNSUPPORTED_CAPABILITY,

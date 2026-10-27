@@ -14,10 +14,10 @@ GenerationEngine owns inference execution and inference-call truth. Products own
 ## Installation
 
 ```bash
-pip install "generationengine[openai,openrouter,fal,typesafe] @ git+https://github.com/Drakosfire/GenerationEngine.git"
+pip install "generationengine[openai,openrouter,vercel,fal,typesafe] @ git+https://github.com/Drakosfire/GenerationEngine.git"
 ```
 
-Text through OpenAI requires `OPENAI_API_KEY`. Text through OpenRouter requires `OPENROUTER_API_KEY`. Images require `FAL_KEY`. TypeSafe decisions require `TYPESAFE_JEV_API_KEY`; the adapter passes it directly to the official async SDK over the Vercel AI Gateway route. Cloudflare credentials are not used here.
+Text through OpenAI requires `OPENAI_API_KEY`. Text through OpenRouter requires `OPENROUTER_API_KEY`. Vercel text requires `AI_GATEWAY_API_KEY` and uses the fixed AI Gateway Chat Completions endpoint. Images require `FAL_KEY`. TypeSafe decisions require `TYPESAFE_JEV_API_KEY`; the adapter passes it directly to the official async SDK over the Vercel AI Gateway route. Cloudflare credentials are not used here.
 
 ## Quick start
 

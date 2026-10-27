@@ -118,7 +118,7 @@ PROFILE_DEFAULTS: dict[InferenceProfile, str] = {
     InferenceProfile.IMAGE_EDIT_HIGH_QUALITY: "gpt-image-1.5",
 }
 
-REGISTERED_TEXT_PROVIDERS: frozenset[str] = frozenset({"openai", "openrouter"})
+REGISTERED_TEXT_PROVIDERS: frozenset[str] = frozenset({"openai", "openrouter", "vercel"})
 
 
 class Resolution:

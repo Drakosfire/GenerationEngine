@@ -122,6 +122,9 @@ openrouter = [
 typesafe = [
     { name = "typesafe-sdk" },
 ]
+vercel = [
+    { name = "openai" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -137,11 +140,12 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.23.0" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=2.14.0" },
     { name = "openai", marker = "extra == 'openrouter'", specifier = ">=2.14.0" },
+    { name = "openai", marker = "extra == 'vercel'", specifier = ">=2.14.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "tenacity", specifier = ">=8.2.0" },
     { name = "typesafe-sdk", marker = "extra == 'typesafe'", specifier = ">=0.7.5,<0.8" },
 ]
-provides-extras = ["openai", "openrouter", "fal", "typesafe"]
+provides-extras = ["openai", "openrouter", "vercel", "fal", "typesafe"]
 
 [package.metadata.requires-dev]
 dev = [

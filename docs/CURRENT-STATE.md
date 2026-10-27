@@ -40,12 +40,30 @@ product adoption. See the [dispatch contract](CORE-CONTRACT.md#opt-in-decision-d
 Registered text providers:
 
 - `openai` → OpenAI Responses adapter;
-- `openrouter` → OpenRouter Chat Completions adapter.
+- `openrouter` → OpenRouter Chat Completions adapter;
+- `vercel` → Vercel AI Gateway Chat Completions adapter (`vercel` extra).
 
 Selection supports:
 
 - governed profile/catalog resolution;
 - explicit `provider + model` execution without requiring a catalog row.
+
+Vercel execution accepts explicit model IDs without a catalog row. The adapter
+reads `AI_GATEWAY_API_KEY` and fixes its destination to
+`https://ai-gateway.vercel.sh/v1`. It forwards unchanged prompts, native JSON
+Schema, `max_tokens`, temperature and documented reasoning effort; schema-less
+JSON-object intent uses the gateway's `response_format.type=json`. Existing GE
+local conformance, repair, retry and deadlines still apply. OpenRouter route
+controls are rejected rather than reinterpreted. Upstream model-specific control
+support is not guaranteed by registration; provider rejections remain failures.
+
+Only one assistant choice ending in `stop` supplies a completed answer. Refusal,
+length truncation, tools and malformed/missing terminals fail closed with safe
+IDs and available usage. Streams remain provisional until a stop terminal and
+close their HTTP response on completion, failure or consumer close. Final
+usage-only chunks are retained; missing usage stays unknown. Reasoning content
+is not substituted for answer text. Provider-free real-SDK/mock-HTTP tests cover
+this contract; no live account/model compatibility or semantic quality is claimed.
 
 `TextRequest.temperature` semantics:
 

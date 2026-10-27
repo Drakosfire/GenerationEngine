@@ -21,6 +21,9 @@ openai = [
 openrouter = [
     "openai>=2.14.0",
 ]
+vercel = [
+    "openai>=2.14.0",
+]
 fal = [
     "fal-client>=0.5.6",
 ]
