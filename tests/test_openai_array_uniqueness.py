@@ -12,7 +12,6 @@ from generationengine import FailureCode, GenerationClient, GenerationEngineErro
 from generationengine.providers.openai_text import OpenAITextProvider
 from generationengine.utils.schema_utils import make_schema_strict
 
-
 SCHEMA = {
     "type": "object",
     "properties": {
