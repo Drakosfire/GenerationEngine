@@ -29,6 +29,7 @@ def make_schema_strict(schema: dict[str, Any]) -> dict[str, Any]:
     """
     # Deep copy to avoid mutating original
     schema = copy.deepcopy(schema)
+    _project_array_uniqueness(schema)
 
     # CRITICAL: Process $defs section FIRST
     # This is where referenced types live (like SpellSlots)
@@ -114,3 +115,34 @@ def _clean_schema_node(schema: dict[str, Any]) -> dict[str, Any]:
     return schema
 
 
+
+
+def _project_array_uniqueness(schema: Any) -> None:
+    """Omit unsupported native uniqueness; the caller schema validates locally.
+
+    Visit schema positions only. A property named ``uniqueItems`` and literal
+    data inside enum/const/default/examples are not schema keywords.
+    """
+    if not isinstance(schema, dict):
+        return
+    schema.pop("uniqueItems", None)
+    for key in ("properties", "patternProperties", "$defs", "definitions", "dependentSchemas"):
+        children = schema.get(key)
+        if isinstance(children, dict):
+            for child in children.values():
+                _project_array_uniqueness(child)
+    for key in (
+        "items", "additionalItems", "additionalProperties", "unevaluatedItems",
+        "unevaluatedProperties", "contains", "propertyNames", "not", "if", "then", "else",
+    ):
+        child = schema.get(key)
+        if isinstance(child, list):
+            for item in child:
+                _project_array_uniqueness(item)
+        else:
+            _project_array_uniqueness(child)
+    for key in ("anyOf", "allOf", "oneOf", "prefixItems"):
+        children = schema.get(key)
+        if isinstance(children, list):
+            for child in children:
+                _project_array_uniqueness(child)

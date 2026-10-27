@@ -43,6 +43,12 @@ Registered text providers:
 - `openrouter` → OpenRouter Chat Completions adapter;
 - `vercel` → Vercel AI Gateway Chat Completions adapter (`vercel` extra).
 
+OpenAI native strict-schema projection omits the unsupported `uniqueItems`
+keyword from schema positions. The original caller schema is not mutated and
+still governs GE local validation and bounded structural repair; duplicate array
+items cannot become a successful structured result when that schema forbids them.
+Literal data and properties named `uniqueItems` are preserved.
+
 Selection supports:
 
 - governed profile/catalog resolution;
