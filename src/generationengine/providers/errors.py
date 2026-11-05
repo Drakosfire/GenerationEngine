@@ -18,6 +18,8 @@ class ProviderError(Exception):
         cached_input_tokens: int | None = None,
         output_tokens: int | None = None,
         reasoning_tokens: int | None = None,
+        cost_usd: float | None = None,
+        pricing_source: str | None = None,
     ) -> None:
         super().__init__(failure.message)
         self.failure = failure
@@ -30,11 +32,15 @@ class ProviderError(Exception):
         self.cached_input_tokens = cached_input_tokens
         self.output_tokens = output_tokens
         self.reasoning_tokens = reasoning_tokens
+        self.cost_usd = cost_usd
+        self.pricing_source = pricing_source
 
     @property
     def retryable(self) -> bool:
         return self.failure.retryability is Retryability.YES
 
     @classmethod
-    def from_code(cls, code: FailureCode, message: str | None = None, **kwargs: object) -> ProviderError:
+    def from_code(
+        cls, code: FailureCode, message: str | None = None, **kwargs: object
+    ) -> ProviderError:
         return cls(InferenceFailure.from_code(code, message), **kwargs)  # type: ignore[arg-type]
