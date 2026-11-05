@@ -7,6 +7,7 @@ the structured contract.
 
 from __future__ import annotations
 
+import math
 import os
 from collections.abc import AsyncIterator
 from typing import Any
@@ -65,6 +66,7 @@ class OpenRouterTextProvider:
     async def stream(self, call: TextGenerationCall) -> AsyncIterator[TextStreamEvent]:
         pieces: list[str] = []
         usage = None
+        known_cost = None
         request_id = None
         response_id = None
         response_model = None
@@ -77,6 +79,9 @@ class OpenRouterTextProvider:
                 response_model = getattr(chunk, "model", None) or response_model
                 if getattr(chunk, "usage", None) is not None:
                     usage = chunk.usage
+                    current_cost = _usage_fields(usage).get("cost_usd")
+                    if current_cost is not None:
+                        known_cost = current_cost
                 choices = getattr(chunk, "choices", None) or []
                 if not choices:
                     continue
@@ -92,23 +97,31 @@ class OpenRouterTextProvider:
                 response_model=response_model,
                 **_usage_fields(usage),
             )
-            yield TextCompleted(
-                final_text=result.text or "",
-                observation=_completed_observation(result),
-            )
+            observation = _completed_observation(result)
+            if result.cost_usd is None and known_cost is not None:
+                observation = observation.model_copy(
+                    update={
+                        "known_cost_usd": known_cost,
+                        "cost_status": "partial",
+                        "pricing_source": "provider_reported:openrouter.usage.cost",
+                    }
+                )
+            yield TextCompleted(final_text=result.text or "", observation=observation)
         except ProviderError as exc:
             yield TextFailed(
                 failure=exc.failure,
-                observation=_empty_failed_observation(exc.failure.code),
+                observation=_empty_failed_observation(exc.failure.code, usage, known_cost),
             )
         except Exception as exc:
             mapped = self._map_exception(exc)
             yield TextFailed(
                 failure=mapped.failure,
-                observation=_empty_failed_observation(mapped.failure.code),
+                observation=_empty_failed_observation(mapped.failure.code, usage, known_cost),
             )
 
-    def _request_kwargs(self, call: TextGenerationCall, *, streaming: bool = False) -> dict[str, Any]:
+    def _request_kwargs(
+        self, call: TextGenerationCall, *, streaming: bool = False
+    ) -> dict[str, Any]:
         messages: list[dict[str, str]] = []
         system_prompt = call.system_prompt
         if call.json_schema and not streaming:
@@ -158,6 +171,7 @@ class OpenRouterTextProvider:
                 provider_request_id=request_id,
                 provider_response_id=response_id,
                 response_model=getattr(response, "model", None),
+                **_usage_fields(getattr(response, "usage", None)),
             )
         text = getattr(message, "content", None) if message is not None else None
         usage = getattr(response, "usage", None)
@@ -174,7 +188,7 @@ class OpenRouterTextProvider:
         return map_openai_compatible_exception(exc)
 
 
-def _usage_fields(usage: Any) -> dict[str, int | None]:
+def _usage_fields(usage: Any) -> dict[str, Any]:
     if usage is None:
         return {
             "input_tokens": None,
@@ -190,7 +204,20 @@ def _usage_fields(usage: Any) -> dict[str, int | None]:
         if completion_details is not None
         else None
     )
+    raw_cost = getattr(usage, "cost", None)
+    # SDK-compatible extra fields are exposed as attributes; malformed billing
+    # metadata must not discard otherwise usable response/token accounting.
+    cost = (
+        float(raw_cost)
+        if isinstance(raw_cost, (int, float))
+        and not isinstance(raw_cost, bool)
+        and math.isfinite(raw_cost)
+        and raw_cost >= 0
+        else None
+    )
     return {
+        "cost_usd": cost,
+        "pricing_source": "provider_reported:openrouter.usage.cost" if cost is not None else None,
         "input_tokens": getattr(usage, "prompt_tokens", None),
         "cached_input_tokens": cached,
         "output_tokens": getattr(usage, "completion_tokens", None),
@@ -198,8 +225,18 @@ def _usage_fields(usage: Any) -> dict[str, int | None]:
     }
 
 
-def _empty_failed_observation(code: FailureCode) -> InferenceObservation:
+def _empty_failed_observation(
+    code: FailureCode, usage: Any = None, known_cost: float | None = None
+) -> InferenceObservation:
+    fields = _usage_fields(usage)
+    current = fields.pop("cost_usd", None)
+    cost = current if current is not None else known_cost
+    if cost is not None:
+        fields["pricing_source"] = "provider_reported:openrouter.usage.cost"
     return InferenceObservation(
+        **fields,
+        known_cost_usd=cost,
+        cost_status="partial" if cost is not None else "unavailable",
         provider=PROVIDER_ID,
         latency_ms=0,
         retry_count=0,
@@ -220,6 +257,10 @@ def _completed_observation(result: TextGenerationResult) -> InferenceObservation
         cached_input_tokens=result.cached_input_tokens,
         output_tokens=result.output_tokens,
         reasoning_tokens=result.reasoning_tokens,
+        cost_usd=result.cost_usd,
+        known_cost_usd=result.cost_usd,
+        cost_status="reported" if result.cost_usd is not None else "unavailable",
+        pricing_source=result.pricing_source,
         latency_ms=0,
         retry_count=0,
         state=ObservationState.COMPLETED,

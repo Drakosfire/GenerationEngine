@@ -43,6 +43,9 @@ class StructuredAttemptCompleted(BaseModel):
     output_tokens: int | None = Field(default=None, ge=0)
     reasoning_tokens: int | None = Field(default=None, ge=0)
 
+    cost_usd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    pricing_source: str | None = None
+
 
 class ProviderRoute(BaseModel):
     """An explicit, ordered upstream provider route for text execution."""
@@ -110,7 +113,11 @@ class BinaryDecisionQuestion(BaseModel):
 
 
 def _validate_labels(labels: tuple[str, ...]) -> tuple[str, ...]:
-    if len(labels) < 2 or any(not label.strip() for label in labels) or len(set(labels)) != len(labels):
+    if (
+        len(labels) < 2
+        or any(not label.strip() for label in labels)
+        or len(set(labels)) != len(labels)
+    ):
         raise ValueError("Decision labels must contain at least two distinct nonblank values")
     return labels
 
@@ -127,7 +134,10 @@ class ChoiceDecisionQuestion(BaseModel):
         _validate_labels(self.options)
         if self.option_descriptions is not None and (
             set(self.option_descriptions) != set(self.options)
-            or any(value is not None and not value.strip() for value in self.option_descriptions.values())
+            or any(
+                value is not None and not value.strip()
+                for value in self.option_descriptions.values()
+            )
         ):
             raise ValueError("Choice descriptions must cover exactly the named options")
         return self

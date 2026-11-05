@@ -6,7 +6,7 @@ import asyncio
 import math
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import TypeVar
+from typing import Any, TypeVar
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -309,15 +309,24 @@ class GenerationClient:
         """One provider-neutral typed decision operation under the shared retry/deadline policy."""
         try:
             request = DecisionRequest.model_validate(
-                request.model_dump(mode="python") if isinstance(request, DecisionRequest) else request
+                request.model_dump(mode="python")
+                if isinstance(request, DecisionRequest)
+                else request
             )
         except ValidationError as exc:
             raise _config_error(
-                InferenceFailure.from_code(FailureCode.INVALID_REQUEST, "Invalid decision request."),
+                InferenceFailure.from_code(
+                    FailureCode.INVALID_REQUEST, "Invalid decision request."
+                ),
                 provider_attempt_count=0,
             ) from exc
         self._ensure_open(decision=request)
-        if not request.provider or not request.model or not request.provider.strip() or not request.model.strip():
+        if (
+            not request.provider
+            or not request.model
+            or not request.provider.strip()
+            or not request.model.strip()
+        ):
             raise _config_error(
                 InferenceFailure.from_code(
                     FailureCode.INVALID_REQUEST, "Decision inference requires provider and model."
@@ -453,9 +462,12 @@ class GenerationClient:
             except ConformanceError:
                 yield _stream_failure(
                     failure=InferenceFailure.from_code(
-                        FailureCode.INVALID_REQUEST, "Schema streaming requires a valid schema and no repair."
+                        FailureCode.INVALID_REQUEST,
+                        "Schema streaming requires a valid schema and no repair.",
                     ),
-                    request=request, started=started, provider_attempt_count=0,
+                    request=request,
+                    started=started,
+                    provider_attempt_count=0,
                 )
                 return
         deadline_s = _deadline_s(request.deadline_ms)
@@ -515,29 +527,36 @@ class GenerationClient:
                         continue
                     if isinstance(event, TextCompleted) and request.json_schema is not None:
                         try:
-                            candidate = candidate_from_result(TextGenerationResult(text=event.final_text))
+                            candidate = candidate_from_result(
+                                TextGenerationResult(text=event.final_text)
+                            )
                             validate_against_schema(candidate, request.json_schema)
                         except ConformanceError:
                             failure = InferenceFailure.from_code(
-                                FailureCode.STRUCTURED_OUTPUT_INVALID, "Stream output did not satisfy the required schema."
+                                FailureCode.STRUCTURED_OUTPUT_INVALID,
+                                "Stream output did not satisfy the required schema.",
                             )
                             event = TextFailed(
                                 failure=failure,
-                                observation=event.observation.model_copy(update={
-                                    "state": ObservationState.FAILED,
-                                    "failure_code": failure.code,
-                                    "provider_attempt_count": 1,
-                                }),
+                                observation=event.observation.model_copy(
+                                    update={
+                                        "state": ObservationState.FAILED,
+                                        "failure_code": failure.code,
+                                        "provider_attempt_count": 1,
+                                    }
+                                ),
                             )
                     if _remaining_s(started, deadline_s) <= 0:
                         failure = InferenceFailure.from_code(FailureCode.PROVIDER_TIMEOUT)
                         event = TextFailed(
                             failure=failure,
-                            observation=event.observation.model_copy(update={
-                                "state": ObservationState.FAILED,
-                                "failure_code": failure.code,
-                                "provider_attempt_count": 1,
-                            }),
+                            observation=event.observation.model_copy(
+                                update={
+                                    "state": ObservationState.FAILED,
+                                    "failure_code": failure.code,
+                                    "provider_attempt_count": 1,
+                                }
+                            ),
                         )
                     terminal = True
                     yield _public_stream_terminal(
@@ -640,6 +659,7 @@ class GenerationClient:
         provider = self._text_provider_for(resolution.provider)
         call = _text_call(request, resolution.provider_model_id)
         provider_attempt_count = 0
+        usage_results: list = []
 
         async def attempt() -> TextGenerationResult:
             nonlocal provider_attempt_count
@@ -652,6 +672,7 @@ class GenerationClient:
                 deadline_s=deadline_s,
                 attempt=attempt,
                 max_transport_retries=request.max_transport_retries,
+                attempt_usage=usage_results,
             )
         except ProviderError as exc:
             raise GenerationEngineError(
@@ -664,6 +685,7 @@ class GenerationClient:
                     retry_count=_retry_count_from_error(exc),
                     provider_attempt_count=provider_attempt_count,
                     result=exc,
+                    usage=_aggregate_usage(usage_results),
                 ),
             ) from exc
         observation = _completed_observation(
@@ -674,6 +696,7 @@ class GenerationClient:
             retry_count=retry_count,
             conformance_retry_count=0,
             provider_attempt_count=1 + retry_count,
+            usage=_aggregate_usage(usage_results),
         )
         if result.refused:
             failure = InferenceFailure.from_code(
@@ -779,6 +802,8 @@ class GenerationClient:
                         cached_input_tokens=exc.cached_input_tokens,
                         output_tokens=exc.output_tokens,
                         reasoning_tokens=exc.reasoning_tokens,
+                        cost_usd=exc.cost_usd,
+                        pricing_source=exc.pricing_source,
                     )
                     try:
                         await on_attempt_completed(event)
@@ -836,6 +861,8 @@ class GenerationClient:
                     cached_input_tokens=result.cached_input_tokens,
                     output_tokens=result.output_tokens,
                     reasoning_tokens=result.reasoning_tokens,
+                    cost_usd=getattr(result, "cost_usd", None),
+                    pricing_source=getattr(result, "pricing_source", None),
                 )
                 try:
                     await on_attempt_completed(event)
@@ -881,7 +908,9 @@ class GenerationClient:
                 parsed = candidate_from_result(result)
                 validate_against_schema(parsed, schema)
             except ConformanceError as failure:
-                if conformance_retries >= min(request.max_conformance_retries, MAX_CONFORMANCE_RETRIES):
+                if conformance_retries >= min(
+                    request.max_conformance_retries, MAX_CONFORMANCE_RETRIES
+                ):
                     invalid = InferenceFailure.from_code(
                         FailureCode.STRUCTURED_OUTPUT_INVALID,
                         "Structured output did not satisfy the supplied schema.",
@@ -936,14 +965,16 @@ class GenerationClient:
                 cached_input_tokens=usage["cached_input_tokens"],
                 output_tokens=usage["output_tokens"],
                 reasoning_tokens=usage["reasoning_tokens"],
-                cost_usd=None,
+                **{
+                    key: usage[key]
+                    for key in ("cost_usd", "known_cost_usd", "cost_status", "pricing_source")
+                },
                 latency_ms=_elapsed_ms(started),
                 retry_count=transport_retries,
                 transport_retry_count=transport_retries,
                 conformance_retry_count=conformance_retries,
                 provider_attempt_count=provider_attempts,
                 state=ObservationState.COMPLETED,
-                pricing_source=resolution.pricing_source,
             )
             return TextResult(text=result.text, parsed=parsed, observation=observation)
 
@@ -1064,7 +1095,10 @@ def _validate_decision_answers(request: DecisionRequest, result: DecisionGenerat
         if answer.kind != question.kind:
             raise ValueError("Decision answer kind differs from question kind")
         if isinstance(question, ChoiceDecisionQuestion):
-            if not isinstance(answer, ChoiceDecisionAnswer) or answer.selected not in question.options:
+            if (
+                not isinstance(answer, ChoiceDecisionAnswer)
+                or answer.selected not in question.options
+            ):
                 raise ValueError("Choice answer selected an unknown option")
             distribution = answer.probabilities
             allowed = set(question.options)
@@ -1077,7 +1111,9 @@ def _validate_decision_answers(request: DecisionRequest, result: DecisionGenerat
             continue
         if distribution is not None and (
             not set(distribution) <= allowed
-            or any(not math.isfinite(value) or not 0 <= value <= 1 for value in distribution.values())
+            or any(
+                not math.isfinite(value) or not 0 <= value <= 1 for value in distribution.values()
+            )
         ):
             raise ValueError("Decision distribution has invalid labels or probabilities")
 
@@ -1183,7 +1219,7 @@ def _elapsed_ms(started: float) -> int:
     return max(int((time.monotonic() - started) * 1000), 0)
 
 
-def _aggregate_usage(results: list) -> dict[str, int | None]:
+def _aggregate_usage(results: list) -> dict[str, Any]:
     """Sum known attempt usage. Any unknown field makes that aggregate None."""
 
     def _field(name: str) -> int | None:
@@ -1197,6 +1233,28 @@ def _aggregate_usage(results: list) -> dict[str, int | None]:
         "cached_input_tokens": _field("cached_input_tokens"),
         "output_tokens": _field("output_tokens"),
         "reasoning_tokens": _field("reasoning_tokens"),
+        **_aggregate_cost(results),
+    }
+
+
+def _aggregate_cost(results: list) -> dict[str, Any]:
+    costs = [getattr(item, "cost_usd", None) for item in results]
+    known = [value for value in costs if value is not None]
+    complete = bool(costs) and len(known) == len(costs)
+    sources = {
+        getattr(item, "pricing_source", None)
+        for item in results
+        if getattr(item, "cost_usd", None) is not None
+    }
+    return {
+        "cost_usd": sum(known) if complete else None,
+        "known_cost_usd": sum(known) if known else None,
+        "cost_status": "reported" if complete else "partial" if known else "unavailable",
+        "pricing_source": next(iter(sources))
+        if len(sources) == 1
+        else "provider_reported:mixed"
+        if sources
+        else None,
     }
 
 
@@ -1316,6 +1374,16 @@ def _public_stream_terminal(
             output_tokens=provider_obs.output_tokens,
             reasoning_tokens=provider_obs.reasoning_tokens,
             provider_attempt_count=provider_obs.provider_attempt_count,
+            usage={
+                "input_tokens": provider_obs.input_tokens,
+                "cached_input_tokens": provider_obs.cached_input_tokens,
+                "output_tokens": provider_obs.output_tokens,
+                "reasoning_tokens": provider_obs.reasoning_tokens,
+                "cost_usd": provider_obs.cost_usd,
+                "known_cost_usd": provider_obs.known_cost_usd,
+                "cost_status": provider_obs.cost_status,
+                "pricing_source": provider_obs.pricing_source,
+            },
         ),
     )
 
@@ -1339,11 +1407,13 @@ def _completed_observation_from_stream(
         cached_input_tokens=provider_obs.cached_input_tokens,
         output_tokens=provider_obs.output_tokens,
         reasoning_tokens=provider_obs.reasoning_tokens,
-        cost_usd=None,
+        cost_usd=provider_obs.cost_usd,
+        known_cost_usd=provider_obs.known_cost_usd,
+        cost_status=provider_obs.cost_status,
         latency_ms=latency_ms,
         retry_count=0,
         state=ObservationState.COMPLETED,
-        pricing_source=resolution.pricing_source,
+        pricing_source=provider_obs.pricing_source,
         conformance_retry_count=0,
         provider_attempt_count=1,
         transport_retry_count=0,
@@ -1359,28 +1429,43 @@ def _completed_observation(
     retry_count: int,
     conformance_retry_count: int = 0,
     provider_attempt_count: int | None = None,
+    usage: dict[str, Any] | None = None,
 ) -> InferenceObservation:
     return InferenceObservation(
         provider=resolution.provider,
-        requested_profile=request.profile.value if isinstance(request, TextRequest) and request.profile else None,
+        requested_profile=request.profile.value
+        if isinstance(request, TextRequest) and request.profile
+        else None,
         requested_model=request.model,
         resolved_model=resolution.resolved_model,
         response_model=result.response_model,
         provider_transport=getattr(result, "provider_transport", None),
         provider_request_id=result.provider_request_id,
         provider_response_id=getattr(result, "provider_response_id", None),
-        input_tokens=result.input_tokens,
-        cached_input_tokens=result.cached_input_tokens,
-        output_tokens=result.output_tokens,
-        reasoning_tokens=result.reasoning_tokens,
-        cost_usd=None,
+        input_tokens=usage["input_tokens"] if usage is not None else result.input_tokens,
+        cached_input_tokens=usage["cached_input_tokens"]
+        if usage is not None
+        else result.cached_input_tokens,
+        output_tokens=usage["output_tokens"] if usage is not None else result.output_tokens,
+        reasoning_tokens=usage["reasoning_tokens"]
+        if usage is not None
+        else result.reasoning_tokens,
+        **(
+            {
+                key: usage[key]
+                for key in ("cost_usd", "known_cost_usd", "cost_status", "pricing_source")
+            }
+            if usage is not None
+            else _aggregate_cost([result] + [None] * retry_count)
+        ),
         latency_ms=latency_ms,
         retry_count=retry_count,
         transport_retry_count=retry_count,
         conformance_retry_count=conformance_retry_count,
-        provider_attempt_count=provider_attempt_count if provider_attempt_count is not None else 1 + retry_count,
+        provider_attempt_count=provider_attempt_count
+        if provider_attempt_count is not None
+        else 1 + retry_count,
         state=ObservationState.COMPLETED,
-        pricing_source=resolution.pricing_source,
     )
 
 
@@ -1404,7 +1489,7 @@ def _failed_observation(
     reasoning_tokens: int | None = None,
     conformance_retry_count: int = 0,
     provider_attempt_count: int | None = None,
-    usage: dict[str, int | None] | None = None,
+    usage: dict[str, Any] | None = None,
 ) -> InferenceObservation:
     profile = None
     model = None
@@ -1433,14 +1518,17 @@ def _failed_observation(
         resolved_model=resolution.resolved_model if resolution else None,
         response_model=response_model or (result.response_model if result else None),
         provider_transport=getattr(result, "provider_transport", None) if result else None,
-        provider_request_id=provider_request_id
-        or (result.provider_request_id if result else None),
+        provider_request_id=provider_request_id or (result.provider_request_id if result else None),
         provider_response_id=provider_response_id
         or (getattr(result, "provider_response_id", None) if result else None),
         input_tokens=(
             usage["input_tokens"]
             if usage is not None
-            else (input_tokens if input_tokens is not None else (result.input_tokens if result else None))
+            else (
+                input_tokens
+                if input_tokens is not None
+                else (result.input_tokens if result else None)
+            )
         ),
         cached_input_tokens=(
             usage["cached_input_tokens"]
@@ -1454,12 +1542,20 @@ def _failed_observation(
         output_tokens=(
             usage["output_tokens"]
             if usage is not None
-            else (output_tokens if output_tokens is not None else (result.output_tokens if result else None))
+            else (
+                output_tokens
+                if output_tokens is not None
+                else (result.output_tokens if result else None)
+            )
         ),
         reasoning_tokens=(
             usage["reasoning_tokens"]
             if usage is not None
-            else (reasoning_tokens if reasoning_tokens is not None else (getattr(result, "reasoning_tokens", None) if result else None))
+            else (
+                reasoning_tokens
+                if reasoning_tokens is not None
+                else (getattr(result, "reasoning_tokens", None) if result else None)
+            )
         ),
         latency_ms=latency_ms,
         retry_count=retry_count,
@@ -1468,7 +1564,14 @@ def _failed_observation(
         provider_attempt_count=provider_attempt_count,
         state=state,
         failure_code=failure.code,
-        pricing_source=resolution.pricing_source if resolution else None,
+        **(
+            {
+                key: usage[key]
+                for key in ("cost_usd", "known_cost_usd", "cost_status", "pricing_source")
+            }
+            if usage is not None
+            else _aggregate_cost(([result] if result is not None else []) + [None] * retry_count)
+        ),
     )
 
 
@@ -1489,6 +1592,8 @@ def _map_provider_exception(exc: Exception) -> ProviderError:
             cached_input_tokens=exc.cached_input_tokens,
             output_tokens=exc.output_tokens,
             reasoning_tokens=exc.reasoning_tokens,
+            cost_usd=exc.cost_usd,
+            pricing_source=exc.pricing_source,
         )
         rebuilt.retry_count = exc.retry_count
         return rebuilt

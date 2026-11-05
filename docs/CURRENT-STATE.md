@@ -287,3 +287,12 @@ bounds, aspect ratio at most 16, PNG/JPEG) and `nano-banana-2-lite`
 Lite does not receive an invented resolution control. No editing or default change.
 Schemas: https://fal.ai/models/bytedance/seedream/v5/pro/text-to-image/api and
 https://fal.ai/models/google/nano-banana-2-lite/api .
+
+OpenRouter text preserves valid finite nonnegative `usage.cost` as a
+provider-reported USD charge. Ordinary and structured calls propagate actual
+charge metadata; structured correction/transport attempts aggregate without
+inventing unknown prices. Streams retain the latest known charge snapshot,
+without summing cumulative snapshots; a later missing price or interrupted
+stream preserves a partial subtotal. Other adapters continue to report unknown
+price unless actual charge evidence is supplied. No rate estimate or billing
+lookup is introduced.

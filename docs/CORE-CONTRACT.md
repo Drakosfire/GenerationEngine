@@ -761,3 +761,17 @@ content is provisional until a valid terminal, with response cleanup on all exit
 Wire references: [requests](https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions/chat-completions),
 [structured outputs](https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions/structured-outputs),
 [reasoning](https://vercel.com/docs/ai-gateway/sdks-and-apis/openai-chat-completions/reasoning).
+
+### Provider-reported charges
+
+`cost_usd` is a complete provider-reported charge when known, never a token-rate
+estimate. `known_cost_usd` retains the sum of reported charges even when another
+attempt has unknown billing. `cost_status` distinguishes `reported`, `partial`,
+and `unavailable`; zero is a real reported amount. A partial known amount must
+not be presented as the operation total. `pricing_source` identifies the charge
+receipt authority, not merely a model catalogue rate.
+
+Structured attempt callbacks carry individual `cost_usd`/`pricing_source`;
+operation observations aggregate those attempts plus transport failures. Do not
+sum callback prices again with the final aggregate. Cached input and reasoning
+output are subsets of their respective token totals, not extra billable totals.

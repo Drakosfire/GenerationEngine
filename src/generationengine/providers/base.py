@@ -62,6 +62,9 @@ class TextGenerationResult(BaseModel):
     output_tokens: int | None = Field(default=None, ge=0)
     reasoning_tokens: int | None = Field(default=None, ge=0)
 
+    cost_usd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    pricing_source: str | None = None
+
 
 class DecisionGenerationCall(BaseModel):
     """Provider-neutral typed decision call; no provider SDK vocabulary."""
@@ -87,8 +90,7 @@ class DecisionGenerationResult(BaseModel):
 class DecisionProvider(Protocol):
     """Execute one typed decision operation behind a provider adapter."""
 
-    async def decide(self, call: DecisionGenerationCall) -> DecisionGenerationResult:
-        ...
+    async def decide(self, call: DecisionGenerationCall) -> DecisionGenerationResult: ...
 
 
 @runtime_checkable

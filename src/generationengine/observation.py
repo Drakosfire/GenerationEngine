@@ -7,6 +7,7 @@ Zero means the provider supplied zero. Full prompts and responses are not fields
 from __future__ import annotations
 
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -52,9 +53,15 @@ class InferenceObservation(BaseModel):
     cached_input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
     reasoning_tokens: int | None = Field(default=None, ge=0)
-    cost_usd: float | None = Field(default=None, ge=0.0)
+    cost_usd: float | None = Field(default=None, ge=0.0, allow_inf_nan=False)
+    known_cost_usd: float | None = Field(default=None, ge=0.0, allow_inf_nan=False)
+    cost_status: Literal["reported", "partial", "unavailable"] = "unavailable"
     latency_ms: int = Field(..., ge=0)
-    retry_count: int = Field(..., ge=0, description="Transport retries: additional provider attempts after the first try of a provider call")
+    retry_count: int = Field(
+        ...,
+        ge=0,
+        description="Transport retries: additional provider attempts after the first try of a provider call",
+    )
     transport_retry_count: int | None = Field(
         default=None,
         ge=0,
