@@ -491,6 +491,21 @@ class FalProvider:
                 f"Fal.ai returned error {e.response.status_code}: {e}",
             ) from e
         except Exception as e:
+            # The Fal SDK preserves the HTTP error as its cause, not its type.
+            cause = e.__cause__
+            if isinstance(cause, httpx.HTTPStatusError) and cause.response.status_code == 422:
+                try:
+                    payload = cause.response.json()
+                except ValueError:
+                    payload = None
+                details = payload.get("detail") if isinstance(payload, dict) else None
+                if isinstance(details, list) and any(
+                    isinstance(detail, dict) and detail.get("type") == "content_policy_violation"
+                    for detail in details
+                ):
+                    raise ProviderError.from_code(
+                        FailureCode.PROVIDER_REFUSED, "The image provider refused this request."
+                    ) from e
             raise ProviderError.from_code(
                 FailureCode.PROVIDER_ERROR,
                 f"Fal.ai generation failed: {e}",

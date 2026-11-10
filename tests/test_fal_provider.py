@@ -129,3 +129,69 @@ async def test_fal_provider_inpainting_gpt_image_15():
             assert call_args[1]["arguments"]["image_urls"] == ["data:image/png;base64,base"]
             assert call_args[1]["arguments"]["mask_image_url"] == "data:image/png;base64,mask"
 
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("editing", [False, True])
+async def test_real_fal_sdk_content_refusal_is_safe_and_never_retried(editing):
+    import httpx
+    from fal_client.client import _raise_for_status
+
+    from generationengine import GenerationClient, GenerationEngineError, ImageRequest
+    from generationengine.failures import FailureCode, Retryability
+
+    response = httpx.Response(422, request=httpx.Request("GET", "https://queue.fal.run/test/model/requests/test"),
+        json={"detail": [{"loc": ["body", "prompt"], "type": "content_policy_violation",
+                         "msg": "PRIVATE_PROVIDER_DETAIL", "input": "PRIVATE_PROMPT"}]})
+    with pytest.raises(Exception) as captured:
+        _raise_for_status(response)
+    sdk_error = captured.value
+    assert isinstance(sdk_error.__cause__, httpx.HTTPStatusError)
+    with patch("generationengine.providers.fal_provider.fal_client.subscribe_async",
+               new=AsyncMock(side_effect=sdk_error)) as submit:
+        client = GenerationClient(image_provider=FalProvider(api_key="synthetic-not-secret"))
+        request = ImageRequest(prompt="Synthetic fantasy creature", model="flux-2-pro",
+            **({"base_image_base64": "data:image/png;base64,synthetic"} if editing else {}))
+        try:
+            with pytest.raises(GenerationEngineError) as failure:
+                await (client.edit_image(request) if editing else client.generate_image(request))
+        finally:
+            await client.aclose()
+        error = failure.value
+        assert error.failure.code is FailureCode.PROVIDER_REFUSED
+        assert error.failure.retryability is Retryability.NO
+        assert error.observation.state.value == "refused"
+        assert error.observation.retry_count == 0
+        assert submit.await_count == 1
+        assert "PRIVATE_" not in str(error) and "PRIVATE_" not in error.failure.model_dump_json()
+        assert error.__cause__.__cause__ is sdk_error
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,payload", [
+    (422, {"detail": [{"type": "value_error", "msg": "content_policy_violation"}]}),
+    (500, {"detail": [{"type": "content_policy_violation"}]}),
+    (422, {"detail": "content_policy_violation"}),
+    (422, {"detail": [None, {"msg": "PRIVATE_DETAIL"}]}),
+    (422, ["content_policy_violation"]),
+    (422, None),
+])
+async def test_fal_sdk_unknown_errors_are_not_guessed_to_be_refusals(status, payload):
+    import httpx
+    from fal_client.client import _raise_for_status
+
+    from generationengine.failures import FailureCode
+    from generationengine.providers.errors import ProviderError
+
+    response = httpx.Response(status, request=httpx.Request("GET", "https://queue.fal.run/test/model/requests/test"),
+        **({"content": b"not JSON"} if payload is None else {"json": payload}))
+    with pytest.raises(Exception) as captured:
+        _raise_for_status(response)
+    with patch("generationengine.providers.fal_provider.fal_client.subscribe_async",
+               new=AsyncMock(side_effect=captured.value)) as submit:
+        with pytest.raises(ProviderError) as failure:
+            await FalProvider(api_key="synthetic-not-secret").generate(
+                prompt="Synthetic fantasy creature", model="flux-2-pro", size=(1024, 1024), num_images=1)
+        assert failure.value.failure.code is FailureCode.PROVIDER_ERROR
+        assert failure.value.failure.message == "Provider request failed."
+        assert submit.await_count == 1
