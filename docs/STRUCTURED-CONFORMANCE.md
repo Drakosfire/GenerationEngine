@@ -79,6 +79,17 @@ A consumer may still instantiate its own Pydantic/domain model from `result.pars
 
 ## Provider strategy
 
+OpenRouter structured generation requires native strict JSON Schema via Chat
+Completions `response_format`. GE sends `provider.require_parameters=true` even
+without an explicit route, preserving any caller route order/fallback restriction.
+No schema prose is appended to caller messages. Unsupported endpoints/schemas
+fail through normalized provider errors; GE does not downgrade to JSON-object or
+prompt-only acquisition. The existing strict-schema projection is reused without
+mutating the caller schema; original-schema local validation remains mandatory.
+A provider's support declaration is not proof of semantic grounding or perfect
+schema enforcement. The general strategy options below apply only where the
+provider adapter supports them; they do not authorize an OpenRouter downgrade.
+
 Provider-native strict-schema support is an optimization, not the contract.
 
 GenerationEngine may choose among strategies such as:

@@ -1,8 +1,7 @@
 """OpenRouter text adapter. Provider identity is openrouter, not openai.
 
-Structured generation uses ordinary chat completions plus JSON instructions.
-Provider-native json_schema is not sent. GenerationEngine local validation is
-the structured contract.
+Structured generation uses strict native JSON Schema and parameter-aware routing.
+No prompt-only downgrade is supported. Original-schema validation remains local.
 """
 
 from __future__ import annotations
@@ -12,7 +11,6 @@ import os
 from collections.abc import AsyncIterator
 from typing import Any
 
-from generationengine.conformance import schema_instruction
 from generationengine.failures import FailureCode
 from generationengine.observation import InferenceObservation, ObservationState
 from generationengine.providers.base import (
@@ -29,6 +27,7 @@ from generationengine.providers.openai_compatible import (
     map_openai_compatible_exception,
     require_openai_sdk,
 )
+from generationengine.utils.schema_utils import make_schema_strict
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 PROVIDER_ID = "openrouter"
@@ -124,9 +123,6 @@ class OpenRouterTextProvider:
     ) -> dict[str, Any]:
         messages: list[dict[str, str]] = []
         system_prompt = call.system_prompt
-        if call.json_schema and not streaming:
-            guide = schema_instruction(call.json_schema)
-            system_prompt = f"{system_prompt}\n\n{guide}" if system_prompt else guide
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": call.user_prompt})
@@ -146,6 +142,16 @@ class OpenRouterTextProvider:
             }
             if call.provider_route.require_parameters:
                 extra_body["provider"]["require_parameters"] = True
+        if call.json_schema is not None:
+            extra_body.setdefault("provider", {})["require_parameters"] = True
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": call.schema_name or "structured_output",
+                    "schema": make_schema_strict(call.json_schema),
+                    "strict": True,
+                },
+            }
         if call.reasoning_effort is not None:
             reasoning: dict[str, Any] = {"effort": call.reasoning_effort}
             if call.reasoning_effort == "none":

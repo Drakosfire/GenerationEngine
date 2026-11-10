@@ -143,7 +143,8 @@ distinct, nonblank upstream provider names and an explicit boolean
 `allow_fallbacks`, plus a strict `require_parameters` boolean defaulting to
 `False`. Names with outer whitespace, duplicate names ignoring case, and
 unknown route fields are invalid. An absent route leaves provider routing
-unspecified and preserves existing request behavior.
+unspecified for ordinary text/JSON-object calls. Structured OpenRouter calls
+always require parameter support, as described below.
 
 OpenRouter Chat maps the route to its provider-selection object inside
 adapter-local `extra_body`. It composes with reasoning controls, including
@@ -155,7 +156,13 @@ guarantee generated content or prove that any endpoint supports the request. A
 route whose selected GE text provider is not OpenRouter fails as
 `INVALID_REQUEST` before provider construction or execution, with zero provider
 attempts; streaming emits one matching failure terminal.
-The route applies unchanged to ordinary, JSON-object, structured, repair,
+Structured OpenRouter requests always send `require_parameters=true`, including
+when the explicit route leaves it false. Route order and `allow_fallbacks` remain
+caller-owned. They send strict native JSON Schema via `response_format`; no schema
+guide is appended to caller prompts and unsupported native requests never downgrade
+to plain text or JSON-object mode. Original-schema local validation remains required.
+
+The route applies to ordinary, JSON-object, structured, repair,
 transport-retry, and streaming calls. It does not select a GE model, add a
 catalog record, or expose arbitrary provider request fields.
 

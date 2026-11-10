@@ -52,6 +52,11 @@ Registered text providers:
 - `openrouter` → OpenRouter Chat Completions adapter;
 - `vercel` → Vercel AI Gateway Chat Completions adapter (`vercel` extra).
 
+OpenRouter structured generation now sends native strict `response_format`
+JSON Schema with parameter-aware endpoint routing. It never appends schema
+instructions to system/user prose or falls back to prompt-only JSON. Endpoint
+errors remain normalized; original-schema local validation still applies.
+
 OpenAI native strict-schema projection omits the unsupported `uniqueItems`
 keyword from schema positions. The original caller schema is not mutated and
 still governs GE local validation and bounded structural repair; duplicate array
