@@ -206,6 +206,10 @@ Real locked SDK/mock-SSE tests prove these boundaries, not live provider adoptio
 ## Images
 
 Fal-backed image generation/editing returns bytes through `ImageResult`.
+Explicit fal422 `content_policy_violation` responses wrapped by its SDK are
+normalized as non-retryable `PROVIDER_REFUSED`, with a fixed safe message.
+The SDK/HTTP exception chain stays internal; other unknown SDK failures retain
+`PROVIDER_ERROR`. No content-policy retry or alternate-provider fallback is added.
 
 GenerationEngine does not publish artifacts, upload to Cloudflare, or return product URLs.
 
