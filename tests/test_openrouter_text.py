@@ -391,13 +391,14 @@ async def test_openrouter_json_object_success_remains_raw_text() -> None:
 
 
 @pytest.mark.asyncio
-async def test_openrouter_structured_uses_json_instruction_not_native_schema() -> None:
+async def test_openrouter_structured_uses_native_schema_without_prompt_injection() -> None:
     completions = _FakeCompletions(response=_chat_response(text='{"name":"x","count":1}'))
     provider = _provider_with_completions(completions)
     result = await provider.generate(
         TextGenerationCall(
             model="deepseek/deepseek-v4.1-flash",
             user_prompt="hello",
+            system_prompt="Exact caller instructions",
             json_schema={
                 "type": "object",
                 "properties": {"name": {"type": "string"}, "count": {"type": "integer"}},
@@ -406,10 +407,16 @@ async def test_openrouter_structured_uses_json_instruction_not_native_schema() -
             schema_name="fixture",
         )
     )
-    assert "response_format" not in completions.calls[0]
-    system = completions.calls[0]["messages"][0]
-    assert system["role"] == "system"
-    assert "JSON Schema" in system["content"]
+    wire = completions.calls[0]
+    assert wire["response_format"]["type"] == "json_schema"
+    assert wire["response_format"]["json_schema"]["strict"] is True
+    assert wire["response_format"]["json_schema"]["name"] == "fixture"
+    assert wire["response_format"]["json_schema"]["schema"]["additionalProperties"] is False
+    assert wire["messages"] == [
+        {"role": "system", "content": "Exact caller instructions"},
+        {"role": "user", "content": "hello"},
+    ]
+    assert wire["extra_body"]["provider"] == {"require_parameters": True}
     assert result.parsed is None
     assert result.text == '{"name":"x","count":1}'
 
@@ -663,3 +670,54 @@ async def test_openrouter_stream_numeric_temperature_is_forwarded() -> None:
     ]
     assert captured["temperature"] == 0.2
     assert isinstance(events[-1], TextCompleted)
+
+
+@pytest.mark.parametrize("require_parameters", [False, True])
+def test_native_schema_requires_parameter_support_without_losing_explicit_route(require_parameters):
+    from copy import deepcopy
+
+    schema = {"type": "object", "properties": {"tags": {"type": "array", "items": {"type": "string"}, "uniqueItems": True}}}
+    before = deepcopy(schema)
+    call = TextGenerationCall(model="fixture/model", user_prompt="unchanged",
+        json_schema=schema, provider_route=ProviderRoute(order=("ProviderA",),
+            allow_fallbacks=False, require_parameters=require_parameters))
+    wire = OpenRouterTextProvider(client=SimpleNamespace())._request_kwargs(call)
+    assert wire["extra_body"]["provider"] == {
+        "order": ["ProviderA"], "allow_fallbacks": False, "require_parameters": True}
+    assert wire["response_format"]["json_schema"]["name"] == "structured_output"
+    assert wire["messages"] == [{"role": "user", "content": "unchanged"}]
+    assert schema == before
+
+
+@pytest.mark.asyncio
+async def test_actual_sdk_native_schema_and_unsupported_route_never_downgrade():
+    import json
+
+    import httpx
+    from openai import AsyncOpenAI
+
+    from generationengine import GenerationClient, GenerationEngineError, TextRequest
+
+    calls = []
+    def reply(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(400, json={"error": {"message": "No route supports structured output", "type": "invalid_request_error"}})
+    sdk = AsyncOpenAI(api_key="offline", base_url=OPENROUTER_BASE_URL, max_retries=0,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(reply)))
+    client = GenerationClient(text_providers={"openrouter": OpenRouterTextProvider(client=sdk)})
+    schema = {"type": "object", "properties": {"answer": {"type": "string"}},
+        "required": ["answer"], "additionalProperties": False}
+    try:
+        with pytest.raises(GenerationEngineError) as raised:
+            await client.generate_structured(TextRequest(provider="openrouter", model="fixture/model",
+                system_prompt="Exact system", user_prompt="Exact user", json_schema=schema,
+                schema_name="answer", max_transport_retries=0, max_conformance_retries=0))
+        assert raised.value.observation.provider_attempt_count == 1
+    finally:
+        await client.aclose()
+    assert len(calls) == 1
+    assert calls[0]["messages"] == [
+        {"role": "system", "content": "Exact system"}, {"role": "user", "content": "Exact user"}]
+    assert calls[0]["response_format"] == {"type": "json_schema", "json_schema": {
+        "name": "answer", "schema": schema, "strict": True}}
+    assert calls[0]["provider"]["require_parameters"] is True
