@@ -1,9 +1,9 @@
 """Execute DeepSeek OCR 2 in an isolated, preconfigured CUDA environment."""
 import argparse
-from contextlib import redirect_stdout
 import json
-from pathlib import Path
 import sys
+from contextlib import redirect_stdout
+from pathlib import Path
 from tempfile import TemporaryDirectory
 
 
