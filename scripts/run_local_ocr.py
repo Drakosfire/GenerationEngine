@@ -9,7 +9,12 @@ from tempfile import TemporaryDirectory
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        required=True,
+        help="Trusted, revision-pinned local model directory. Loading it executes checkpoint Python.",
+    )
     parser.add_argument("--image", type=Path, required=True)
     args = parser.parse_args()
     if not args.checkpoint.is_dir() or not args.image.is_file():
