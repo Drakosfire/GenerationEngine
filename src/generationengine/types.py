@@ -93,8 +93,8 @@ class TextRequest(BaseModel):
     schema_name: str | None = None
     deadline_ms: int | None = Field(
         default=None,
-        ge=1,
-        description="Overall GenerationEngine operation budget in milliseconds, including retries.",
+        ge=0,
+        description="Overall operation budget in milliseconds, including retries. Zero disables the overall deadline.",
     )
 
 
