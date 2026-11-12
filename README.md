@@ -11,6 +11,12 @@ GenerationEngine owns inference execution and inference-call truth. Products own
 | [docs/STRUCTURED-CONFORMANCE.md](docs/STRUCTURED-CONFORMANCE.md) | Adopted structured-generation refinement |
 | [docs/README.md](docs/README.md) | Documentation authority/index |
 
+## Agent pickup
+
+Read [AGENTS.md](AGENTS.md), then use the [documentation index](docs/README.md)
+to find current state, contracts, and handoffs. The
+[CI workflow](.github/workflows/ci.yml) defines the repository lint and test checks.
+
 ## Installation
 
 ```bash
