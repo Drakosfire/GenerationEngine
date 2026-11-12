@@ -105,6 +105,24 @@ def test_openai_maps_sdk_errors_to_safe_public_messages() -> None:
     assert "openai.com" not in rate_limited.failure.message
 
 
+@pytest.mark.parametrize("status_code", [400, 401, 403, 404, 422])
+def test_openai_logs_only_safe_http_status_for_client_errors(status_code: int, caplog) -> None:
+    class FakeClientError(Exception):
+        def __init__(self) -> None:
+            super().__init__(f"HTTP {status_code} Authorization Bearer sk-secret: private body")
+            self.status_code = status_code
+            self.request_id = "req_safe"
+
+    error = OpenAITextProvider(client=SimpleNamespace())._map_exception(FakeClientError())
+
+    assert error.failure.code is FailureCode.PROVIDER_ERROR
+    assert error.failure.message == "Provider request failed."
+    assert error.provider_request_id == "req_safe"
+    assert f"HTTP status={status_code} request_id=req_safe" in caplog.text
+    assert "sk-secret" not in caplog.text
+    assert "private body" not in caplog.text
+
+
 def _sdk_response(*, text: str, input_tokens: int = 4, output_tokens: int = 1) -> SimpleNamespace:
     return SimpleNamespace(
         id="resp_abc",

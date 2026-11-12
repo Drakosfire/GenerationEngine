@@ -6,8 +6,12 @@ OpenAI-compatible transport exceptions and SDK import checks.
 
 from __future__ import annotations
 
+import logging
+
 from generationengine.failures import FailureCode
 from generationengine.providers.errors import ProviderError
+
+logger = logging.getLogger(__name__)
 
 try:
     from openai import APIError, APITimeoutError, AsyncOpenAI, RateLimitError
@@ -40,11 +44,17 @@ def map_openai_compatible_exception(exc: Exception) -> ProviderError:
         return exc
     name = type(exc).__name__
     kwargs = {"provider_request_id": request_id_from_exception(exc)}
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int) and 400 <= status < 500:
+        logger.warning(
+            "OpenAI-compatible provider request failed: HTTP status=%s request_id=%s",
+            status,
+            kwargs["provider_request_id"],
+        )
     if is_sdk_exception(exc, RateLimitError) or "RateLimit" in name:
         return ProviderError.from_code(FailureCode.RATE_LIMITED, **kwargs)
     if is_sdk_exception(exc, APITimeoutError) or "Timeout" in name:
         return ProviderError.from_code(FailureCode.PROVIDER_TIMEOUT, **kwargs)
-    status = getattr(exc, "status_code", None)
     if status == 429:
         return ProviderError.from_code(FailureCode.RATE_LIMITED, **kwargs)
     if isinstance(status, int) and status >= 500:
