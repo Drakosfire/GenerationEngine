@@ -1173,7 +1173,7 @@ async def _execute_with_retries(
 
 
 async def _with_timeout(awaitable: Awaitable[T], timeout_s: float) -> T:
-    return await asyncio.wait_for(awaitable, timeout=timeout_s)
+    return await asyncio.wait_for(awaitable, timeout=None if timeout_s == float("inf") else timeout_s)
 
 
 async def _anext_or_none(iterator: AsyncIterator[T]) -> T | None:
@@ -1198,6 +1198,8 @@ async def _aclose_stream(stream: AsyncIterator[T] | None) -> None:
 def _deadline_s(deadline_ms: int | None) -> float:
     if deadline_ms is None:
         return DEFAULT_DEADLINE_S
+    if deadline_ms == 0:
+        return float("inf")
     return max(deadline_ms / 1000.0, 0.001)
 
 

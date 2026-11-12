@@ -720,3 +720,27 @@ async def test_explicit_zero_conformance_retries_stops_after_first_invalid_respo
     assert len(provider.calls) == 1
     assert provider.calls[0].max_conformance_retries == 0
     assert failure.value.observation.conformance_retry_count == 0
+
+
+@pytest.mark.asyncio
+async def test_explicit_deadline_opt_out_allows_slow_conformance_repair(monkeypatch) -> None:
+    import asyncio
+
+    class SlowSecond(ScriptedText):
+        async def generate(self, call: TextGenerationCall) -> TextGenerationResult:
+            self.calls.append(call)
+            if len(self.calls) == 1:
+                return _result(text="bad", parsed=None)
+            await asyncio.sleep(0.05)
+            return _result()
+
+    monkeypatch.setattr("generationengine.client.DEFAULT_DEADLINE_S", 0.01)
+    default = GenerationClient(text_provider=SlowSecond([]))
+    with pytest.raises(GenerationEngineError) as exc:
+        await default.generate_structured(_request())
+    assert exc.value.failure.code is FailureCode.PROVIDER_TIMEOUT
+
+    opted_out = GenerationClient(text_provider=SlowSecond([]))
+    result = await opted_out.generate_structured(_request(deadline_ms=0))
+    assert result.observation.conformance_retry_count == 1
+    assert result.parsed is not None
