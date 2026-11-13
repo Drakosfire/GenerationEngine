@@ -164,3 +164,15 @@ def test_union_keeps_one_of_if_cleanup_removes_tag_literals():
         ],
     }
     assert "oneOf" in make_schema_strict(schema)
+
+
+def test_union_keeps_one_of_if_cleanup_replaces_entire_branch():
+    schema = {
+        "discriminator": {"propertyName": "kind"},
+        "oneOf": [
+            {"type": "object", "properties": {"kind": {"const": tag}},
+             "anyOf": [{"type": "object"}, {"type": "null"}]}
+            for tag in ("first", "second")
+        ],
+    }
+    assert "oneOf" in make_schema_strict(schema)

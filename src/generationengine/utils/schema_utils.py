@@ -167,13 +167,15 @@ def _has_distinct_tags(schema: dict[str, Any], root: dict[str, Any]) -> bool:
             if not isinstance(ref, str) or not ref.startswith("#/$defs/"):
                 return False
             branch = root.get("$defs", {}).get(ref.removeprefix("#/$defs/"), {})
-        if not isinstance(branch, dict) or branch.get("type") != "object":
+        if not isinstance(branch, dict):
+            return False
+        branch = _clean_schema_node(copy.deepcopy(branch))
+        if branch.get("type") != "object" or name not in branch.get("required", []):
             return False
         properties = branch.get("properties")
         field = properties.get(name) if isinstance(properties, dict) else None
-        tag = _clean_schema_node(copy.deepcopy(field)).get("const") if isinstance(field, dict) else None
+        tag = field.get("const") if isinstance(field, dict) else None
         if not isinstance(tag, str) or tag in tags:
             return False
-        # The wire projection makes every declared object property required.
         tags.add(tag)
     return True
