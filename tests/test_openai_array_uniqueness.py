@@ -69,7 +69,7 @@ def test_projection_visits_definitions_and_compositions_but_not_property_names_o
     }
     projected = make_schema_strict(schema)
     assert projected["properties"]["uniqueItems"] == {"type": "boolean"}
-    assert projected["properties"]["payload"] == schema["properties"]["payload"]
+    assert projected["properties"]["payload"] == {k: v for k, v in schema["properties"]["payload"].items() if k != "default"}
     assert "uniqueItems" not in projected["$defs"]["ids"]
     assert "uniqueItems" not in projected["properties"]["refs"]
     assert schema["$defs"]["ids"]["uniqueItems"] is True
@@ -121,3 +121,20 @@ async def test_real_sdk_wire_projection_and_original_local_validation(repair):
         assert request.json_schema == original
     finally:
         await engine.aclose()
+
+def test_tagged_unions_project_to_any_of_without_mutating_caller_schema():
+    union = {
+        "discriminator": {"propertyName": "kind"},
+        "oneOf": [
+            {"type": "object", "properties": {"kind": {"const": tag, "default": tag}}}
+            for tag in ("first", "second")
+        ],
+    }
+    original = copy.deepcopy(union)
+    projected = make_schema_strict(union)
+    assert set(projected) == {"anyOf"}
+    for branch, tag in zip(projected["anyOf"], ("first", "second"), strict=True):
+        assert branch["properties"]["kind"] == {"const": tag}
+        assert branch["required"] == ["kind"]
+        assert branch["additionalProperties"] is False
+    assert union == original

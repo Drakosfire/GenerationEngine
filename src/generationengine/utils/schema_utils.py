@@ -29,7 +29,7 @@ def make_schema_strict(schema: dict[str, Any]) -> dict[str, Any]:
     """
     # Deep copy to avoid mutating original
     schema = copy.deepcopy(schema)
-    _project_array_uniqueness(schema)
+    _project_provider_schema(schema)
 
     # CRITICAL: Process $defs section FIRST
     # This is where referenced types live (like SpellSlots)
@@ -117,20 +117,24 @@ def _clean_schema_node(schema: dict[str, Any]) -> dict[str, Any]:
 
 
 
-def _project_array_uniqueness(schema: Any) -> None:
-    """Omit unsupported native uniqueness; the caller schema validates locally.
+def _project_provider_schema(schema: Any) -> None:
+    """Project schema annotations and Pydantic tagged unions for OpenAI.
 
-    Visit schema positions only. A property named ``uniqueItems`` and literal
-    data inside enum/const/default/examples are not schema keywords.
+    Traverse schema positions only. Local validation retains the original
+    schema, including exclusivity for tagged unions.
     """
     if not isinstance(schema, dict):
         return
     schema.pop("uniqueItems", None)
+    schema.pop("default", None)
+    if "discriminator" in schema and "oneOf" in schema and "anyOf" not in schema:
+        schema.pop("discriminator")
+        schema["anyOf"] = schema.pop("oneOf")
     for key in ("properties", "patternProperties", "$defs", "definitions", "dependentSchemas"):
         children = schema.get(key)
         if isinstance(children, dict):
             for child in children.values():
-                _project_array_uniqueness(child)
+                _project_provider_schema(child)
     for key in (
         "items", "additionalItems", "additionalProperties", "unevaluatedItems",
         "unevaluatedProperties", "contains", "propertyNames", "not", "if", "then", "else",
@@ -138,11 +142,11 @@ def _project_array_uniqueness(schema: Any) -> None:
         child = schema.get(key)
         if isinstance(child, list):
             for item in child:
-                _project_array_uniqueness(item)
+                _project_provider_schema(item)
         else:
-            _project_array_uniqueness(child)
+            _project_provider_schema(child)
     for key in ("anyOf", "allOf", "oneOf", "prefixItems"):
         children = schema.get(key)
         if isinstance(children, list):
             for child in children:
-                _project_array_uniqueness(child)
+                _project_provider_schema(child)
