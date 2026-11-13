@@ -138,3 +138,16 @@ def test_tagged_unions_project_to_any_of_without_mutating_caller_schema():
         assert branch["required"] == ["kind"]
         assert branch["additionalProperties"] is False
     assert union == original
+
+
+@pytest.mark.parametrize("second_tag, expected", [("second", "anyOf"), ("first", "oneOf")])
+def test_referenced_tags_must_be_distinct(second_tag, expected):
+    schema = {
+        "$defs": {
+            key: {"type": "object", "properties": {"kind": {"const": tag}}}
+            for key, tag in (("First", "first"), ("Second", second_tag))
+        },
+        "discriminator": {"propertyName": "kind"},
+        "oneOf": [{"$ref": "#/$defs/First"}, {"$ref": "#/$defs/Second"}],
+    }
+    assert make_schema_strict(schema)[expected] == schema["oneOf"]

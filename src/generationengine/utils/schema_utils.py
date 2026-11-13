@@ -29,7 +29,7 @@ def make_schema_strict(schema: dict[str, Any]) -> dict[str, Any]:
     """
     # Deep copy to avoid mutating original
     schema = copy.deepcopy(schema)
-    _project_provider_schema(schema)
+    _project_provider_schema(schema, schema)
 
     # CRITICAL: Process $defs section FIRST
     # This is where referenced types live (like SpellSlots)
@@ -117,7 +117,7 @@ def _clean_schema_node(schema: dict[str, Any]) -> dict[str, Any]:
 
 
 
-def _project_provider_schema(schema: Any) -> None:
+def _project_provider_schema(schema: Any, root: dict[str, Any]) -> None:
     """Project schema annotations and Pydantic tagged unions for OpenAI.
 
     Traverse schema positions only. Local validation retains the original
@@ -127,14 +127,14 @@ def _project_provider_schema(schema: Any) -> None:
         return
     schema.pop("uniqueItems", None)
     schema.pop("default", None)
-    if "discriminator" in schema and "oneOf" in schema and "anyOf" not in schema:
+    if "discriminator" in schema and "oneOf" in schema and "anyOf" not in schema and _has_distinct_tags(schema, root):
         schema.pop("discriminator")
         schema["anyOf"] = schema.pop("oneOf")
     for key in ("properties", "patternProperties", "$defs", "definitions", "dependentSchemas"):
         children = schema.get(key)
         if isinstance(children, dict):
             for child in children.values():
-                _project_provider_schema(child)
+                _project_provider_schema(child, root)
     for key in (
         "items", "additionalItems", "additionalProperties", "unevaluatedItems",
         "unevaluatedProperties", "contains", "propertyNames", "not", "if", "then", "else",
@@ -142,11 +142,38 @@ def _project_provider_schema(schema: Any) -> None:
         child = schema.get(key)
         if isinstance(child, list):
             for item in child:
-                _project_provider_schema(item)
+                _project_provider_schema(item, root)
         else:
-            _project_provider_schema(child)
+            _project_provider_schema(child, root)
     for key in ("anyOf", "allOf", "oneOf", "prefixItems"):
         children = schema.get(key)
         if isinstance(children, list):
             for child in children:
-                _project_provider_schema(child)
+                _project_provider_schema(child, root)
+
+
+def _has_distinct_tags(schema: dict[str, Any], root: dict[str, Any]) -> bool:
+    discriminator = schema["discriminator"]
+    name = discriminator.get("propertyName") if isinstance(discriminator, dict) else None
+    if not isinstance(name, str) or not isinstance(schema["oneOf"], list) or not schema["oneOf"]:
+        return False
+
+    tags = set()
+    for branch in schema["oneOf"]:
+        if not isinstance(branch, dict):
+            return False
+        ref = branch.get("$ref")
+        if ref is not None:
+            if not isinstance(ref, str) or not ref.startswith("#/$defs/"):
+                return False
+            branch = root.get("$defs", {}).get(ref.removeprefix("#/$defs/"), {})
+        if not isinstance(branch, dict) or branch.get("type") != "object":
+            return False
+        properties = branch.get("properties")
+        field = properties.get(name) if isinstance(properties, dict) else None
+        tag = field.get("const") if isinstance(field, dict) and "$ref" not in field else None
+        if not isinstance(tag, str) or tag in tags:
+            return False
+        # The wire projection makes every declared object property required.
+        tags.add(tag)
+    return True
