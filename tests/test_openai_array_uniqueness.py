@@ -151,3 +151,16 @@ def test_referenced_tags_must_be_distinct(second_tag, expected):
         "oneOf": [{"$ref": "#/$defs/First"}, {"$ref": "#/$defs/Second"}],
     }
     assert make_schema_strict(schema)[expected] == schema["oneOf"]
+
+
+def test_union_keeps_one_of_if_cleanup_removes_tag_literals():
+    schema = {
+        "discriminator": {"propertyName": "kind"},
+        "oneOf": [
+            {"type": "object", "properties": {"kind": {
+                "const": tag, "anyOf": [{"type": "string"}, {"type": "null"}],
+            }}}
+            for tag in ("first", "second")
+        ],
+    }
+    assert "oneOf" in make_schema_strict(schema)
