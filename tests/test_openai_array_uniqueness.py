@@ -69,7 +69,7 @@ def test_projection_visits_definitions_and_compositions_but_not_property_names_o
     }
     projected = make_schema_strict(schema)
     assert projected["properties"]["uniqueItems"] == {"type": "boolean"}
-    assert projected["properties"]["payload"] == schema["properties"]["payload"]
+    assert projected["properties"]["payload"] == {k: v for k, v in schema["properties"]["payload"].items() if k != "default"}
     assert "uniqueItems" not in projected["$defs"]["ids"]
     assert "uniqueItems" not in projected["properties"]["refs"]
     assert schema["$defs"]["ids"]["uniqueItems"] is True
@@ -121,3 +121,58 @@ async def test_real_sdk_wire_projection_and_original_local_validation(repair):
         assert request.json_schema == original
     finally:
         await engine.aclose()
+
+def test_tagged_unions_project_to_any_of_without_mutating_caller_schema():
+    union = {
+        "discriminator": {"propertyName": "kind"},
+        "oneOf": [
+            {"type": "object", "properties": {"kind": {"const": tag, "default": tag}}}
+            for tag in ("first", "second")
+        ],
+    }
+    original = copy.deepcopy(union)
+    projected = make_schema_strict(union)
+    assert set(projected) == {"anyOf"}
+    for branch, tag in zip(projected["anyOf"], ("first", "second"), strict=True):
+        assert branch["properties"]["kind"] == {"const": tag}
+        assert branch["required"] == ["kind"]
+        assert branch["additionalProperties"] is False
+    assert union == original
+
+
+@pytest.mark.parametrize("second_tag, expected", [("second", "anyOf"), ("first", "oneOf")])
+def test_referenced_tags_must_be_distinct(second_tag, expected):
+    schema = {
+        "$defs": {
+            key: {"type": "object", "properties": {"kind": {"const": tag}}}
+            for key, tag in (("First", "first"), ("Second", second_tag))
+        },
+        "discriminator": {"propertyName": "kind"},
+        "oneOf": [{"$ref": "#/$defs/First"}, {"$ref": "#/$defs/Second"}],
+    }
+    assert make_schema_strict(schema)[expected] == schema["oneOf"]
+
+
+def test_union_keeps_one_of_if_cleanup_removes_tag_literals():
+    schema = {
+        "discriminator": {"propertyName": "kind"},
+        "oneOf": [
+            {"type": "object", "properties": {"kind": {
+                "const": tag, "anyOf": [{"type": "string"}, {"type": "null"}],
+            }}}
+            for tag in ("first", "second")
+        ],
+    }
+    assert "oneOf" in make_schema_strict(schema)
+
+
+def test_union_keeps_one_of_if_cleanup_replaces_entire_branch():
+    schema = {
+        "discriminator": {"propertyName": "kind"},
+        "oneOf": [
+            {"type": "object", "properties": {"kind": {"const": tag}},
+             "anyOf": [{"type": "object"}, {"type": "null"}]}
+            for tag in ("first", "second")
+        ],
+    }
+    assert "oneOf" in make_schema_strict(schema)
