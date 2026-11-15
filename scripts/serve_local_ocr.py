@@ -1,16 +1,19 @@
 """Expose the CUDA OCR runner on loopback for an authenticated private tunnel."""
 
 import argparse
+import contextlib
 import hmac
 import io
 import json
 import os
 import selectors
+import socket
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Timer
 from time import monotonic
 
 from PIL import Image
@@ -52,6 +55,18 @@ def serve(checkpoint: Path, port: int, token: str) -> None:
     class Handler(BaseHTTPRequestHandler):
         timeout = 10
 
+        def handle(self) -> None:
+            self.read_deadline = Timer(self.timeout, self.stop_reading)
+            self.read_deadline.start()
+            try:
+                super().handle()
+            finally:
+                self.read_deadline.cancel()
+
+        def stop_reading(self) -> None:
+            with contextlib.suppress(OSError):
+                self.connection.shutdown(socket.SHUT_RD)
+
         def reply(self, status: int, payload: dict) -> None:
             body = json.dumps(payload).encode()
             self.send_response(status)
@@ -81,6 +96,7 @@ def serve(checkpoint: Path, port: int, token: str) -> None:
                 self.reply(400, {"error": "Expected a bounded PNG request"})
                 return
             raw = self.rfile.read(int(length))
+            self.read_deadline.cancel()
             try:
                 if len(raw) != int(length):
                     raise ValueError("Incomplete body")
