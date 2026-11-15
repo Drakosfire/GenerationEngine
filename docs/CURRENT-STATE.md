@@ -305,3 +305,17 @@ without summing cumulative snapshots; a later missing price or interrupted
 stream preserves a partial subtotal. Other adapters continue to report unknown
 price unless actual charge evidence is supplied. No rate estimate or billing
 lookup is introduced.
+
+## Private DeepSeek OCR 2 worker
+
+Run `scripts/serve_local_ocr.py --checkpoint /absolute/pinned/checkpoint`
+with the same CUDA Python environment as `scripts/run_local_ocr.py`. Supply
+`GENERATIONENGINE_OCR_TOKEN` through the worker's private service environment.
+The worker listens on `127.0.0.1:8798` by default. Reach it through an
+authenticated private tunnel and keep the listener off public interfaces.
+
+Send `POST /ocr` with a Bearer token and an `image/png` body. The body may
+contain one frame up to 1024 pixels on either axis and 4,500,000 bytes encoded,
+with a Content-Length header. A successful response is JSON containing
+`text`, including the model's image grounding markup. The worker processes
+one capture at a time and limits CUDA inference to 120 seconds.
