@@ -56,12 +56,27 @@ def serve(checkpoint: Path, port: int, token: str) -> None:
         timeout = 10
 
         def handle(self) -> None:
+            self.started_at = monotonic()
+            self.input_bytes = 0
             self.read_deadline = Timer(self.timeout, self.stop_reading)
             self.read_deadline.start()
             try:
                 super().handle()
             finally:
                 self.read_deadline.cancel()
+
+        def log_message(self, format: str, *args: object) -> None:
+            # BaseHTTPRequestHandler includes client-controlled request lines.
+            pass
+
+        def log_request(self, code: int | str = "-", size: int | str = "-") -> None:
+            record = {
+                "event": "ocr_http_request",
+                "status": int(code),
+                "duration_ms": round((monotonic() - self.started_at) * 1000),
+                "input_bytes": self.input_bytes,
+            }
+            print(json.dumps(record), file=sys.stderr, flush=True)
 
         def stop_reading(self) -> None:
             with contextlib.suppress(OSError):
@@ -96,6 +111,7 @@ def serve(checkpoint: Path, port: int, token: str) -> None:
                 self.reply(400, {"error": "Expected a bounded PNG request"})
                 return
             raw = self.rfile.read(int(length))
+            self.input_bytes = len(raw)
             self.read_deadline.cancel()
             try:
                 if len(raw) != int(length):
