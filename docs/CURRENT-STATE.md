@@ -319,3 +319,8 @@ contain one frame up to 1024 pixels on either axis and 4,500,000 bytes encoded,
 with a Content-Length header. A successful response is JSON containing
 `text`, including the model's image grounding markup. The worker processes
 one capture at a time and limits CUDA inference to 120 seconds.
+
+The worker writes one JSON usage record to stderr per HTTP response status.
+It reports the status, elapsed milliseconds up to response headers, and body
+bytes read. Requests rejected before reading the body report zero bytes.
+The record omits request lines, credentials, capture pixels and transcriptions.
