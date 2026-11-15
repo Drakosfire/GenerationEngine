@@ -5,16 +5,47 @@ import hmac
 import io
 import json
 import os
+import selectors
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from time import monotonic
 
 from PIL import Image
 
 MAX_INPUT = 4_500_000
 MAX_OUTPUT = 1_000_000
+
+
+def run_ocr(checkpoint: Path, image: Path) -> bytes:
+    command = [
+        sys.executable, str(Path(__file__).with_name("run_local_ocr.py")),
+        "--checkpoint", str(checkpoint), "--image", str(image),
+    ]
+    deadline = monotonic() + 120
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as worker:
+        assert worker.stdout is not None
+        try:
+            output = bytearray()
+            with selectors.DefaultSelector() as selector:
+                selector.register(worker.stdout, selectors.EVENT_READ)
+                while selector.select(max(0, deadline - monotonic())):
+                    chunk = os.read(worker.stdout.fileno(), min(65536, MAX_OUTPUT + 1 - len(output)))
+                    if not chunk:
+                        break
+                    output.extend(chunk)
+                    if len(output) > MAX_OUTPUT:
+                        raise ValueError("OCR result too large")
+                else:
+                    raise subprocess.TimeoutExpired(command, 120)
+            if worker.wait(timeout=max(0, deadline - monotonic())):
+                raise subprocess.CalledProcessError(worker.returncode, command)
+            return bytes(output)
+        finally:
+            if worker.poll() is None:
+                worker.kill()
 
 
 def serve(checkpoint: Path, port: int, token: str) -> None:
@@ -64,14 +95,8 @@ def serve(checkpoint: Path, port: int, token: str) -> None:
                 with TemporaryDirectory(prefix="generationengine-ocr-http-") as scratch:
                     path = Path(scratch) / "capture.png"
                     path.write_bytes(raw)
-                    result = subprocess.run(
-                        [sys.executable, str(Path(__file__).with_name("run_local_ocr.py")),
-                         "--checkpoint", str(checkpoint), "--image", str(path)],
-                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True, timeout=120,
-                    )
-                if len(result.stdout) > MAX_OUTPUT:
-                    raise ValueError("OCR result too large")
-                text = json.loads(result.stdout)["text"]
+                    output = run_ocr(checkpoint, path)
+                text = json.loads(output)["text"]
                 if not isinstance(text, str):
                     raise ValueError("Invalid OCR result")
             except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
