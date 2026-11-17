@@ -76,8 +76,9 @@ def _clean_schema_node(schema: dict[str, Any]) -> dict[str, Any]:
                     {"type": "null"},
                 ]
             }
-        elif has_null and len(non_null_types) == 1:
-            # Nullable non-$ref type - can flatten to type array
+        elif has_null and len(non_null_types) == 1 and non_null_types[0].get("type") != "array":
+            # Preserve explicit nullable array branches for OpenAI. Other
+            # single-type nullable schemas retain their existing projection.
             actual_type = non_null_types[0]
             # Start fresh with just the actual type
             result = {}

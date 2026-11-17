@@ -77,7 +77,8 @@ def test_projection_visits_definitions_and_compositions_but_not_property_names_o
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("repair", [False, True])
-async def test_real_sdk_wire_projection_and_original_local_validation(repair):
+@pytest.mark.parametrize("nullable", [False, True])
+async def test_real_sdk_wire_projection_and_original_local_validation(repair, nullable):
     calls = []
     outputs = [candidate(["q1", "q1"]), candidate(["q1"])]
 
@@ -96,9 +97,13 @@ async def test_real_sdk_wire_projection_and_original_local_validation(repair):
     sdk = AsyncOpenAI(api_key="synthetic-test-key", max_retries=0,
                       http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond)))
     engine = GenerationClient(text_provider=OpenAITextProvider(client=sdk))
-    original = copy.deepcopy(SCHEMA)
+    schema = copy.deepcopy(SCHEMA)
+    props = schema["properties"]["observation_nodes"]["items"]["properties"]["evidence_refs"]["items"]["properties"]
+    if nullable:
+        props["source_quote_ids"] = {"anyOf": [props["source_quote_ids"], {"type": "null"}]}
+    original = copy.deepcopy(schema)
     request = TextRequest(provider="openai", model="gpt-6-luna", user_prompt="Return evidence references.",
-                          json_schema=SCHEMA, temperature=None, max_conformance_retries=int(repair))
+                          json_schema=schema, temperature=None, max_conformance_retries=int(repair))
     try:
         if repair:
             result = await engine.generate_structured(request)
@@ -115,9 +120,13 @@ async def test_real_sdk_wire_projection_and_original_local_validation(repair):
             wire = body["text"]["format"]
             assert wire["strict"] is True
             ids = wire["schema"]["properties"]["observation_nodes"]["items"]["properties"]["evidence_refs"]["items"]["properties"]["source_quote_ids"]
+            if nullable:
+                ids, null = ids["anyOf"]
+                assert null == {"type": "null"}
+            assert ids["type"] == "array"
             assert "uniqueItems" not in ids
             assert ids["minItems"] == 1
-        assert SCHEMA == original
+        assert schema == original
         assert request.json_schema == original
     finally:
         await engine.aclose()
